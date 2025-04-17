@@ -1,0 +1,2005 @@
+{
+  "info": {
+    "_postman_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "name": "HappyGo API",
+    "description": "Complete API collection for HappyGo mobile application",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Authentication",
+      "item": [
+        {
+          "name": "Register User",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"name\": \"John Doe\",\n    \"email\": \"john@example.com\",\n    \"mobile\": \"9876543210\"\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/auth/register",
+              "host": ["{{BASE_URL}}"],
+              "path": ["auth", "register"]
+            },
+            "description": "Register a new user with name, email, and mobile number"
+          },
+          "response": []
+        },
+        {
+          "name": "Verify Email",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/auth/verify-email/:token",
+              "host": ["{{BASE_URL}}"],
+              "path": ["auth", "verify-email", ":token"],
+              "variable": [
+                {
+                  "key": "token",
+                  "value": "your_verification_token"
+                }
+              ]
+            },
+            "description": "Verify user email with token sent to email"
+          },
+          "response": []
+        },
+        {
+          "name": "Send Mobile OTP",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"mobile\": \"9876543210\"\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/auth/send-mobile-otp",
+              "host": ["{{BASE_URL}}"],
+              "path": ["auth", "send-mobile-otp"]
+            },
+            "description": "Send OTP to user's mobile number for verification"
+          },
+          "response": []
+        },
+        {
+          "name": "Verify Mobile OTP (Login)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"mobile\": \"9876543210\",\n    \"otp\": \"123456\"\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/auth/verify-mobile-otp",
+              "host": ["{{BASE_URL}}"],
+              "path": ["auth", "verify-mobile-otp"]
+            },
+            "description": "Verify OTP and login user"
+          },
+          "response": []
+        },
+        {
+          "name": "Login (Send OTP)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"mobile\": \"9876543210\"\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/auth/login",
+              "host": ["{{BASE_URL}}"],
+              "path": ["auth", "login"]
+            },
+            "description": "Send OTP to user's mobile for login"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Current User",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{BASE_URL}}/auth/me",
+              "host": ["{{BASE_URL}}"],
+              "path": ["auth", "me"]
+            },
+            "description": "Get current logged in user details"
+          },
+          "response": []
+        }
+      ],
+      "description": "User authentication endpoints"
+    },
+    {
+      "name": "Bikes",
+      "item": [
+        {
+          "name": "Get All Bikes",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/bikes?limit=10&page=1&sort=-createdAt",
+              "host": ["{{BASE_URL}}"],
+              "path": ["bikes"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "10"
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "sort",
+                  "value": "-createdAt"
+                },
+                {
+                  "key": "search",
+                  "value": "Honda",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Get all bikes with pagination and sorting"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Trending Bikes",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/bikes/trending",
+              "host": ["{{BASE_URL}}"],
+              "path": ["bikes", "trending"]
+            },
+            "description": "Get trending bikes for homepage"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Available Bikes",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/bikes/available?startDate=2025-05-01&endDate=2025-05-03&startTime=09:00&endTime=18:00",
+              "host": ["{{BASE_URL}}"],
+              "path": ["bikes", "available"],
+              "query": [
+                {
+                  "key": "startDate",
+                  "value": "2025-05-01"
+                },
+                {
+                  "key": "endDate",
+                  "value": "2025-05-03"
+                },
+                {
+                  "key": "startTime",
+                  "value": "09:00"
+                },
+                {
+                  "key": "endTime",
+                  "value": "18:00"
+                },
+                {
+                  "key": "location",
+                  "value": "Chikkamagaluru",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Get bikes available for booking in a specific time period"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Single Bike",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/bikes/:id",
+              "host": ["{{BASE_URL}}"],
+              "path": ["bikes", ":id"],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "bike_id_here"
+                }
+              ]
+            },
+            "description": "Get details of a specific bike"
+          },
+          "response": []
+        },
+        {
+          "name": "Create Bike (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"title\": \"Honda Activa 6G\",\n    \"description\": \"Comfortable and fuel-efficient scooter\",\n    \"brand\": \"Honda\",\n    \"model\": \"Activa 6G\",\n    \"year\": 2023,\n    \"images\": [\"/images/bikes/activa.jpg\"],\n    \"pricePerDay\": {\n        \"limitedKm\": {\n            \"price\": 350,\n            \"kmLimit\": 60\n        },\n        \"unlimited\": {\n            \"price\": 600\n        }\n    },\n    \"additionalKmPrice\": 4,\n    \"isAvailable\": true,\n    \"isTrending\": true,\n    \"registrationNumber\": \"KA01AB1234\",\n    \"location\": \"Chikkamagaluru\",\n    \"features\": [\"Fuel Efficient\", \"Comfortable Seat\", \"Storage Space\"],\n    \"requiredDocuments\": [\"ID Proof\", \"Driving License\"]\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/bikes",
+              "host": ["{{BASE_URL}}"],
+              "path": ["bikes"]
+            },
+            "description": "Create a new bike (Admin only)"
+          },
+          "response": []
+        },
+        {
+          "name": "Update Bike (Admin)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"pricePerDay\": {\n        \"limitedKm\": {\n            \"price\": 400\n        },\n        \"unlimited\": {\n            \"price\": 650\n        }\n    },\n    \"isTrending\": true\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/bikes/:id",
+              "host": ["{{BASE_URL}}"],
+              "path": ["bikes", ":id"],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "bike_id_here"
+                }
+              ]
+            },
+            "description": "Update bike details (Admin only)"
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Bike (Admin)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{BASE_URL}}/bikes/:id",
+              "host": ["{{BASE_URL}}"],
+              "path": ["bikes", ":id"],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "bike_id_here"
+                }
+              ]
+            },
+            "description": "Delete a bike (Admin only)"
+          },
+          "response": []
+        }
+      ],
+      "description": "Bike management endpoints"
+    },
+    {
+      "name": "Hotels",
+      "item": [
+        {
+          "name": "Get All Hotels",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/hotels?limit=10&page=1&sort=-createdAt",
+              "host": ["{{BASE_URL}}"],
+              "path": ["hotels"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "10"
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "sort",
+                  "value": "-createdAt"
+                },
+                {
+                  "key": "search",
+                  "value": "Chikkamagaluru",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Get all hotels with pagination and sorting"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Available Hotels",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/hotels/available?checkIn=2025-05-01&checkOut=2025-05-03&people=2",
+              "host": ["{{BASE_URL}}"],
+              "path": ["hotels", "available"],
+              "query": [
+                {
+                  "key": "checkIn",
+                  "value": "2025-05-01"
+                },
+                {
+                  "key": "checkOut",
+                  "value": "2025-05-03"
+                },
+                {
+                  "key": "people",
+                  "value": "2"
+                }
+              ]
+            },
+            "description": "Get hotels available for booking in a specific time period"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Single Hotel",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/hotels/:id",
+              "host": ["{{BASE_URL}}"],
+              "path": ["hotels", ":id"],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "hotel_id_here"
+                }
+              ]
+            },
+            "description": "Get details of a specific hotel"
+          },
+          "response": []
+        },
+        {
+          "name": "Create Hotel (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"name\": \"Happy Go Chikkamagaluru\",\n    \"description\": \"A luxury hostel located in Shringanda Village\",\n    \"location\": \"Chikkamagaluru\",\n    \"address\": \"Shringanda Village, Chikkamagaluru\",\n    \"images\": [\"/images/hotels/happygo.jpg\"],\n    \"amenities\": [\n        {\"name\": \"Bonfire\", \"icon\": \"fire\"},\n        {\"name\": \"AC\", \"icon\": \"snowflake\"},\n        {\"name\": \"Common Washroom\", \"icon\": \"bath\"},\n        {\"name\": \"Wi-Fi\", \"icon\": \"wifi\"}\n    ],\n    \"rooms\": [\n        {\n            \"type\": \"Bed in 6 Bed Mixed A/C Dormitory Room with Ensuite Bathroom\",\n            \"description\": \"Comfortable bed in mixed dormitory\",\n            \"images\": [\"/images/rooms/dorm.jpg\"],\n            \"capacity\": 1,\n            \"priceOptions\": {\n                \"bedOnly\": {\n                    \"basePrice\": 923,\n                    \"discountedPrice\": 698.35\n                },\n                \"bedAndBreakfast\": {\n                    \"basePrice\": 955,\n                    \"discountedPrice\": 570.32\n                },\n                \"bedBreakfastAndDinner\": {\n                    \"basePrice\": 1055,\n                    \"discountedPrice\": 570.32\n                }\n            },\n            \"amenities\": [\"AC\", \"Ensuite Bathroom\"],\n            \"totalRooms\": 6,\n            \"availableRooms\": 5\n        }\n    ],\n    \"guidelines\": [\"All guests to carry Govt. photo ID (PAN card invalid)\"],\n    \"checkInGuidelines\": [\"Legal IDs not accepted\", \"Hostel Rules\"],\n    \"cancellationPolicies\": [\"Cancellations/modifications allowed for free up to 15 days or 360 hours before the standard check-in time.\"]\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/hotels",
+              "host": ["{{BASE_URL}}"],
+              "path": ["hotels"]
+            },
+            "description": "Create a new hotel (Admin only)"
+          },
+          "response": []
+        },
+        {
+          "name": "Update Hotel (Admin)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"rooms\": [\n        {\n            \"type\": \"Bed in 6 Bed Mixed A/C Dormitory Room with Ensuite Bathroom\",\n            \"priceOptions\": {\n                \"bedOnly\": {\n                    \"basePrice\": 923,\n                    \"discountedPrice\": 698.35\n                }\n            },\n            \"totalRooms\": 8,\n            \"availableRooms\": 7\n        }\n    ]\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/hotels/:id",
+              "host": ["{{BASE_URL}}"],
+              "path": ["hotels", ":id"],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "hotel_id_here"
+                }
+              ]
+            },
+            "description": "Update hotel details (Admin only)"
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Hotel (Admin)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{BASE_URL}}/hotels/:id",
+              "host": ["{{BASE_URL}}"],
+              "path": ["hotels", ":id"],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "hotel_id_here"
+                }
+              ]
+            },
+            "description": "Delete a hotel (Admin only)"
+          },
+          "response": []
+        }
+      ],
+      "description": "Hotel management endpoints"
+    },
+    {
+      "name": "Products",
+      "item": [
+        {
+          "name": "Get All Products",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/products?category=Food&limit=10&page=1&sort=-createdAt&isBestseller=true",
+              "host": ["{{BASE_URL}}"],
+              "path": ["products"],
+              "query": [
+                {
+                  "key": "category",
+                  "value": "Food"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "sort",
+                  "value": "-createdAt"
+                },
+                {
+                  "key": "isBestseller",
+                  "value": "true"
+                },
+                {
+                  "key": "search",
+                  "value": "Coffee",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Get all products with pagination, sorting and filtering"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Single Product",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/products/:id",
+              "host": ["{{BASE_URL}}"],
+              "path": ["products", ":id"],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "product_id_here"
+                }
+              ]
+            },
+            "description": "Get details of a specific product"
+          },
+          "response": []
+        },
+        {
+          "name": "Create Product (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"title\": \"Choco Coffee\",\n    \"description\": \"A mocha is typically based on the combination of an espresso and hot milk with added chocolate flavours.\",\n    \"images\": [\"/images/products/choco-coffee.jpg\"],\n    \"category\": \"Food\",\n    \"price\": {\n        \"basePrice\": 852,\n        \"discountedPrice\": 698.35\n    },\n    \"stock\": 100,\n    \"isAvailable\": true,\n    \"isBestseller\": true,\n    \"taxRate\": 0.18\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/products",
+              "host": ["{{BASE_URL}}"],
+              "path": ["products"]
+            },
+            "description": "Create a new product (Admin only)"
+          },
+          "response": []
+        },
+        {
+          "name": "Update Product (Admin)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"price\": {\n        \"basePrice\": 852,\n        \"discountedPrice\": 698.35\n    },\n    \"stock\": 80\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/products/:id",
+              "host": ["{{BASE_URL}}"],
+              "path": ["products", ":id"],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "product_id_here"
+                }
+              ]
+            },
+            "description": "Update product details (Admin only)"
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Product (Admin)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{BASE_URL}}/products/:id",
+              "host": ["{{BASE_URL}}"],
+              "path": ["products", ":id"],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "product_id_here"
+                }
+              ]
+            },
+            "description": "Delete a product (Admin only)"
+          },
+          "response": []
+        }
+      ],
+      "description": "Product management endpoints"
+    },
+    {
+      "name": "Bookings",
+      "item": [
+        {
+          "name": "Create Booking",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"bookingType\": \"bike\",\n    \"bikeId\": \"bike_id_here\",\n    \"startDate\": \"2025-05-01\",\n    \"endDate\": \"2025-05-03\",\n    \"startTime\": \"09:00\",\n    \"endTime\": \"18:00\",\n    \"priceDetails\": {\n        \"basePrice\": 600,\n        \"taxes\": 75.84,\n        \"discount\": 0,\n        \"totalAmount\": 675.84\n    },\n    \"bikeDetails\": {\n        \"kmLimit\": 60,\n        \"isUnlimited\": false,\n        \"additionalKmPrice\": 4\n    }\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/bookings",
+              "host": ["{{BASE_URL}}"],
+              "path": ["bookings"]
+            },
+            "description": "Create a new booking for bike or hotel"
+          },
+          "response": []
+        },
+        {
+          "name": "Create Hotel Booking",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"bookingType\": \"hotel\",\n    \"hotelId\": \"hotel_id_here\",\n    \"roomType\": \"Bed in 6 Bed Mixed A/C Dormitory Room with Ensuite Bathroom\",\n    \"startDate\": \"2025-05-01\",\n    \"endDate\": \"2025-05-03\",\n    \"numberOfPeople\": 1,\n    \"priceDetails\": {\n        \"basePrice\": 2000,\n        \"taxes\": 360,\n        \"discount\": 0,\n        \"totalAmount\": 2360\n    },\n    \"hotelDetails\": {\n        \"roomOption\": \"bedAndBreakfast\",\n        \"checkInTime\": \"12:00\"\n    }\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/bookings",
+              "host": ["{{BASE_URL}}"],
+              "path": ["bookings"]
+            },
+            "description": "Create a new hotel booking"
+          },
+          "response": []
+        },
+        {
+          "name": "Get All Bookings",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{BASE_URL}}/bookings?type=bike&status=confirmed",
+              "host": ["{{BASE_URL}}"],
+              "path": ["bookings"],
+              "query": [
+                {
+                  "key": "type",
+                  "value": "bike"
+                },
+                {
+                  "key": "status",
+                  "value": "confirmed"
+                },
+                {
+                  "key": "limit",
+                  "value": "10",
+                  "disabled": true
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "disabled": true
+                },
+                {
+                  "key": "sort",
+                  "value": "-createdAt",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Get all bookings for the current user with filtering"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Single Booking",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{BASE_URL}}/bookings/:id",
+              "host": ["{{BASE_URL}}"],
+              "path": ["bookings", ":id"],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "booking_id_here"
+                }
+              ]
+            },
+            "description": "Get details of a specific booking"
+          },
+          "response": []
+        },
+        {
+          "name": "Update Booking Status",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"status\": \"cancelled\",\n    \"cancellationReason\": \"Change of plans\"\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/bookings/:id/status",
+              "host": ["{{BASE_URL}}"],
+              "path": ["bookings", ":id", "status"],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "booking_id_here"
+                }
+              ]
+            },
+            "description": "Update the status of a booking"
+          },
+          "response": []
+        },
+        {
+          "name": "Upload Documents for Bike Booking",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"idProof\": \"url_to_id_proof_image\",\n    \"drivingLicense\": \"url_to_driving_license_image\"\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/bookings/:id/documents",
+              "host": ["{{BASE_URL}}"],
+              "path": ["bookings", ":id", "documents"],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "booking_id_here"
+                }
+              ]
+            },
+            "description": "Upload required documents for bike booking"
+          },
+          "response": []
+        }
+      ],
+      "description": "Booking management endpoints"
+    },
+    {
+      "name": "Orders",
+      "item": [
+        {
+          "name": "Create Order",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"products\": [\n        {\n            \"product\": \"product_id_here\",\n            \"quantity\": 1,\n            \"price\": 698.35\n        }\n    ],\n    \"deliveryAddress\": {\n        \"address\": \"123 Main St\",\n        \"city\": \"Chikkamagaluru\",\n        \"state\": \"Karnataka\",\n        \"pincode\": \"577101\",\n        \"coordinates\": {\n            \"latitude\": 13.3161,\n            \"longitude\": 75.7720\n        }\n    },\n    \"priceDetails\": {\n        \"subtotal\": 698.35,\n        \"taxes\": 125.70,\n        \"deliveryCharge\": 50,\n        \"discount\": 0,\n        \"totalAmount\": 874.05\n    },\n    \"estimatedDeliveryDate\": \"2025-05-05\"\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/orders",
+              "host": ["{{BASE_URL}}"],
+              "path": ["orders"]
+            },
+            "description": "Create a new product order"
+          },
+          "response": []
+        },
+        {
+          "name": "Get All Orders",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{BASE_URL}}/orders?status=processing",
+              "host": ["{{BASE_URL}}"],
+              "path": ["orders"],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "processing"
+                },
+                {
+                  "key": "limit",
+                  "value": "10",
+                  "disabled": true
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "disabled": true
+                },
+                {
+                  "key": "sort",
+                  "value": "-createdAt",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Get all orders for the current user with filtering"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Single Order",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{BASE_URL}}/orders/:id",
+              "host": ["{{BASE_URL}}"],
+              "path": ["orders", ":id"],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "order_id_here"
+                }
+              ]
+            },
+            "description": "Get details of a specific order"
+          },
+          "response": []
+        },
+        {
+          "name": "Update Order Status",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"status\": \"cancelled\",\n    \"cancellationReason\": \"Out of stock\"\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/orders/:id/status",
+              "host": ["{{BASE_URL}}"],
+              "path": ["orders", ":id", "status"],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "order_id_here"
+                }
+              ]
+            },
+            "description": "Update the status of an order"
+          },
+          "response": []
+        }
+      ],
+      "description": "Order management endpoints"
+    },
+    {
+      "name": "Referrals",
+      "item": [
+        {
+          "name": "Get Referral Details",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{BASE_URL}}/referrals",
+              "host": ["{{BASE_URL}}"],
+              "path": ["referrals"]
+            },
+            "description": "Get referral details for the current user"
+          },
+          "response": []
+        },
+        {
+          "name": "Apply Referral Code",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"referralCode\": \"JO1A2B3C\"\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/referrals/apply",
+              "host": ["{{BASE_URL}}"],
+              "path": ["referrals", "apply"]
+            },
+            "description": "Apply a referral code"
+          },
+          "response": []
+        },
+        {
+          "name": "Complete Referral (Admin)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{BASE_URL}}/referrals/:id/complete",
+              "host": ["{{BASE_URL}}"],
+              "path": ["referrals", ":id", "complete"],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "referral_id_here"
+                }
+              ]
+            },
+            "description": "Mark a referral as completed (Admin only)"
+          },
+          "response": []
+        },
+        {
+          "name": "Withdraw Referral Rewards",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"upiId\": \"user@upi\",\n    \"amount\": 100\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/referrals/withdraw",
+              "host": ["{{BASE_URL}}"],
+              "path": ["referrals", "withdraw"]
+            },
+            "description": "Withdraw referral rewards to UPI"
+          },
+          "response": []
+        }
+      ],
+      "description": "Referral management endpoints"
+    },
+    {
+      "name": "Places",
+      "item": [
+        {
+          "name": "Get All Places",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/places?category=Tourist%20Spot&limit=10&page=1",
+              "host": ["{{BASE_URL}}"],
+              "path": ["places"],
+              "query": [
+                {
+                  "key": "category",
+                  "value": "Tourist%20Spot"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "search",
+                  "value": "Waterfall",
+                  "disabled": true
+                },
+                {
+                  "key": "sort",
+                  "value": "-ratings",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Get all places with filtering and pagination"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Single Place",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/places/:id",
+              "host": ["{{BASE_URL}}"],
+              "path": ["places", ":id"],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "place_id_here"
+                }
+              ]
+            },
+            "description": "Get details of a specific place"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Itinerary Suggestions",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{BASE_URL}}/places/itinerary?days=3&location=Chikkamagaluru",
+              "host": ["{{BASE_URL}}"],
+              "path": ["places", "itinerary"],
+              "query": [
+                {
+                  "key": "days",
+                  "value": "3"
+                },
+                {
+                  "key": "location",
+                  "value": "Chikkamagaluru"
+                }
+              ]
+            },
+            "description": "Get itinerary suggestions based on number of days"
+          },
+          "response": []
+        },
+        {
+          "name": "Create Place (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"name\": \"Mullayanagiri Peak\",\n    \"description\": \"Highest peak in Karnataka\",\n    \"location\": \"Chikkamagaluru\",\n    \"coordinates\": {\n        \"latitude\": 13.3914,\n        \"longitude\": 75.7219\n    },\n    \"images\": [\"/images/places/mullayanagiri.jpg\"],\n    \"category\": \"Tourist Spot\",\n    \"recommendedDuration\": 3,\n    \"bestTimeToVisit\": \"October to March\"\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/places",
+              "host": ["{{BASE_URL}}"],
+              "path": ["places"]
+            },
+            "description": "Create a new place (Admin only)"
+          },
+          "response": []
+        },
+        {
+          "name": "Update Place (Admin)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"recommendedDuration\": 4,\n    \"bestTimeToVisit\": \"September to March\"\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/places/:id",
+              "host": ["{{BASE_URL}}"],
+              "path": ["places", ":id"],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "place_id_here"
+                }
+              ]
+            },
+            "description": "Update place details (Admin only)"
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Place (Admin)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{BASE_URL}}/places/:id",
+              "host": ["{{BASE_URL}}"],
+              "path": ["places", ":id"],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "place_id_here"
+                }
+              ]
+            },
+            "description": "Delete a place (Admin only)"
+          },
+          "response": []
+        }
+      ],
+      "description": "Places and itinerary endpoints"
+    },
+    {
+      "name": "Payments",
+      "item": [
+        {
+          "name": "Create Booking Payment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{BASE_URL}}/payments/booking/:id",
+              "host": ["{{BASE_URL}}"],
+              "path": ["payments", "booking", ":id"],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "booking_id_here"
+                }
+              ]
+            },
+            "description": "Create a payment order for booking"
+          },
+          "response": []
+        },
+        {
+          "name": "Create Order Payment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{BASE_URL}}/payments/order/:id",
+              "host": ["{{BASE_URL}}"],
+              "path": ["payments", "order", ":id"],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "order_id_here"
+                }
+              ]
+            },
+            "description": "Create a payment order for product order"
+          },
+          "response": []
+        },
+        {
+          "name": "Verify Booking Payment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"razorpay_order_id\": \"order_id_from_razorpay\",\n    \"razorpay_payment_id\": \"payment_id_from_razorpay\",\n    \"razorpay_signature\": \"signature_from_razorpay\"\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/payments/booking/:id/verify",
+              "host": ["{{BASE_URL}}"],
+              "path": ["payments", "booking", ":id", "verify"],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "booking_id_here"
+                }
+              ]
+            },
+            "description": "Verify payment for booking"
+          },
+          "response": []
+        },
+        {
+          "name": "Verify Order Payment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"razorpay_order_id\": \"order_id_from_razorpay\",\n    \"razorpay_payment_id\": \"payment_id_from_razorpay\",\n    \"razorpay_signature\": \"signature_from_razorpay\"\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/payments/order/:id/verify",
+              "host": ["{{BASE_URL}}"],
+              "path": ["payments", "order", ":id", "verify"],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "order_id_here"
+                }
+              ]
+            },
+            "description": "Verify payment for order"
+          },
+          "response": []
+        }
+      ],
+      "description": "Payment processing endpoints"
+    },
+    {
+      "name": "Admin",
+      "item": [
+        {
+          "name": "Get Dashboard Data",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{BASE_URL}}/admin/dashboard",
+              "host": ["{{BASE_URL}}"],
+              "path": ["admin", "dashboard"]
+            },
+            "description": "Get admin dashboard data"
+          },
+          "response": []
+        },
+        {
+          "name": "Create Employee",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"name\": \"Employee Name\",\n    \"email\": \"employee@example.com\",\n    \"mobile\": \"9876543210\",\n    \"password\": \"password123\",\n    \"role\": \"bike\",\n    \"assignedModules\": [\"bike\"],\n    \"assignedEntities\": [\"bike_id_1\", \"bike_id_2\"]\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/admin/employees",
+              "host": ["{{BASE_URL}}"],
+              "path": ["admin", "employees"]
+            },
+            "description": "Create a new employee"
+          },
+          "response": []
+        },
+        {
+          "name": "Get All Employees",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{BASE_URL}}/admin/employees?role=bike",
+              "host": ["{{BASE_URL}}"],
+              "path": ["admin", "employees"],
+              "query": [
+                {
+                  "key": "role",
+                  "value": "bike"
+                },
+                {
+                  "key": "limit",
+                  "value": "10",
+                  "disabled": true
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "disabled": true
+                },
+                {
+                  "key": "sort",
+                  "value": "-createdAt",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Get all employees with filtering"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Single Employee",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{BASE_URL}}/admin/employees/:id",
+              "host": ["{{BASE_URL}}"],
+              "path": ["admin", "employees", ":id"],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "employee_id_here"
+                }
+              ]
+            },
+            "description": "Get details of a specific employee"
+          },
+          "response": []
+        },
+        {
+          "name": "Update Employee",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"assignedModules\": [\"bike\", \"hotel\"],\n    \"assignedEntities\": [\"bike_id_1\", \"bike_id_2\", \"hotel_id_1\"]\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/admin/employees/:id",
+              "host": ["{{BASE_URL}}"],
+              "path": ["admin", "employees", ":id"],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "employee_id_here"
+                }
+              ]
+            },
+            "description": "Update employee details"
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Employee",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{BASE_URL}}/admin/employees/:id",
+              "host": ["{{BASE_URL}}"],
+              "path": ["admin", "employees", ":id"],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "employee_id_here"
+                }
+              ]
+            },
+            "description": "Delete (deactivate) an employee"
+          },
+          "response": []
+        },
+        {
+          "name": "Assign Booking to Employee",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"employeeId\": \"employee_id_here\"\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/admin/bookings/:id/assign",
+              "host": ["{{BASE_URL}}"],
+              "path": ["admin", "bookings", ":id", "assign"],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "booking_id_here"
+                }
+              ]
+            },
+            "description": "Assign a booking to an employee"
+          },
+          "response": []
+        },
+        {
+          "name": "Assign Order to Employee",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"employeeId\": \"employee_id_here\"\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/admin/orders/:id/assign",
+              "host": ["{{BASE_URL}}"],
+              "path": ["admin", "orders", ":id", "assign"],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "order_id_here"
+                }
+              ]
+            },
+            "description": "Assign an order to an employee"
+          },
+          "response": []
+        },
+        {
+          "name": "Get All Bookings (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{BASE_URL}}/admin/bookings?type=bike&status=pending",
+              "host": ["{{BASE_URL}}"],
+              "path": ["admin", "bookings"],
+              "query": [
+                {
+                  "key": "type",
+                  "value": "bike"
+                },
+                {
+                  "key": "status",
+                  "value": "pending"
+                },
+                {
+                  "key": "limit",
+                  "value": "10",
+                  "disabled": true
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "disabled": true
+                },
+                {
+                  "key": "sort",
+                  "value": "-createdAt",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Get all bookings (Admin view)"
+          },
+          "response": []
+        },
+        {
+          "name": "Get All Orders (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{BASE_URL}}/admin/orders?status=pending",
+              "host": ["{{BASE_URL}}"],
+              "path": ["admin", "orders"],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "pending"
+                },
+                {
+                  "key": "limit",
+                  "value": "10",
+                  "disabled": true
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "disabled": true
+                },
+                {
+                  "key": "sort",
+                  "value": "-createdAt",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Get all orders (Admin view)"
+          },
+          "response": []
+        },
+        {
+          "name": "Get All Referrals (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{BASE_URL}}/admin/referrals?status=pending",
+              "host": ["{{BASE_URL}}"],
+              "path": ["admin", "referrals"],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "pending"
+                },
+                {
+                  "key": "limit",
+                  "value": "10",
+                  "disabled": true
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "disabled": true
+                },
+                {
+                  "key": "sort",
+                  "value": "-createdAt",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Get all referrals (Admin view)"
+          },
+          "response": []
+        }
+      ],
+      "description": "Admin management endpoints"
+    },
+    {
+      "name": "Employee",
+      "item": [
+        {
+          "name": "Login Employee",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"email\": \"employee@example.com\",\n    \"password\": \"password123\"\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/employees/login",
+              "host": ["{{BASE_URL}}"],
+              "path": ["employees", "login"]
+            },
+            "description": "Login as employee"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Current Employee",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{BASE_URL}}/employees/me",
+              "host": ["{{BASE_URL}}"],
+              "path": ["employees", "me"]
+            },
+            "description": "Get current logged in employee details"
+          }
+        },
+
+        {
+          "name": "Update Employee Password",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"currentPassword\": \"password123\",\n    \"newPassword\": \"newpassword123\"\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/employees/update-password",
+              "host": ["{{BASE_URL}}"],
+              "path": ["employees", "update-password"]
+            },
+            "description": "Update employee password"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Employee Dashboard Data",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{BASE_URL}}/employees/dashboard",
+              "host": ["{{BASE_URL}}"],
+              "path": ["employees", "dashboard"]
+            },
+            "description": "Get employee dashboard data"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Assigned Bookings",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{BASE_URL}}/employees/bookings?type=bike&status=pending",
+              "host": ["{{BASE_URL}}"],
+              "path": ["employees", "bookings"],
+              "query": [
+                {
+                  "key": "type",
+                  "value": "bike"
+                },
+                {
+                  "key": "status",
+                  "value": "pending"
+                },
+                {
+                  "key": "limit",
+                  "value": "10",
+                  "disabled": true
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "disabled": true
+                },
+                {
+                  "key": "sort",
+                  "value": "-createdAt",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Get bookings assigned to employee"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Assigned Orders",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{BASE_URL}}/employees/orders?status=pending",
+              "host": ["{{BASE_URL}}"],
+              "path": ["employees", "orders"],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "pending"
+                },
+                {
+                  "key": "limit",
+                  "value": "10",
+                  "disabled": true
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "disabled": true
+                },
+                {
+                  "key": "sort",
+                  "value": "-createdAt",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Get orders assigned to employee"
+          },
+          "response": []
+        },
+        {
+          "name": "Update Booking Status (Employee)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"status\": \"completed\",\n    \"finalKmReading\": 1250\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/employees/bookings/:id/status",
+              "host": ["{{BASE_URL}}"],
+              "path": ["employees", "bookings", ":id", "status"],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "booking_id_here"
+                }
+              ]
+            },
+            "description": "Update booking status by employee"
+          },
+          "response": []
+        },
+        {
+          "name": "Update Order Status (Employee)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"status\": \"shipped\"\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/employees/orders/:id/status",
+              "host": ["{{BASE_URL}}"],
+              "path": ["employees", "orders", ":id", "status"],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "order_id_here"
+                }
+              ]
+            },
+            "description": "Update order status by employee"
+          },
+          "response": []
+        }
+      ],
+      "description": "Employee management endpoints"
+    }
+  ]
+}
