@@ -123,6 +123,25 @@ export const sendMobileOTP = asyncHandler(async (req, res) => {
     otp = await generateEmployeeOTP(foundEmployee);
   }
 
+  const message = `
+  <div style="max-width: 400px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; padding: 30px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+    <h2 style="margin: 0 0 20px; color: #333333; font-size: 20px;">Your Login Code</h2>
+    
+    <div style="background-color: #f5f5f5; border-radius: 6px; padding: 15px; margin: 20px 0;">
+      <span style="font-family: monospace; font-size: 24px; font-weight: bold; letter-spacing: 4px; color: #333333;">${otp}</span>
+    </div>
+    
+    <p style="margin: 0; color: #666666; font-size: 14px;">This code expires in 10 minutes.</p>
+  </div>
+`;
+
+  let userData = entityType === "user" ? foundUser : foundEmployee;
+  await sendEmail({
+    email: userData.email,
+    subject: "Email Verification",
+    message,
+  });
+
   console.log("🚀 ~ sendMobileOTP ~ otp:", otp);
 
   // Send OTP via SMS
@@ -266,6 +285,27 @@ export const loginUser = asyncHandler(async (req, res) => {
     }
 
     console.log("🚀 ~ loginUser ~ otp:", otp);
+
+    const message = `
+    <div style="max-width: 400px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; padding: 30px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+      <h2 style="margin: 0 0 20px; color: #333333; font-size: 20px;">Your Login Code</h2>
+      
+      <div style="background-color: #f5f5f5; border-radius: 6px; padding: 15px; margin: 20px 0;">
+        <span style="font-family: monospace; font-size: 24px; font-weight: bold; letter-spacing: 4px; color: #333333;">${otp}</span>
+      </div>
+      
+      <p style="margin: 0; color: #666666; font-size: 14px;">This code expires in 10 minutes.</p>
+    </div>
+  `;
+
+    let userData = entityType === "user" ? foundUser : foundEmployee;
+    await sendEmail({
+      email: userData.email,
+      subject: "Email Verification",
+      message,
+    });
+
+    console.log("🚀 ~ sendMobileOTP ~ otp:", otp);
 
     // Send OTP via SMS
     // await sendSMS({
