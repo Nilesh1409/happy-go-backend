@@ -20,6 +20,7 @@ import adminRoutes from "./routes/admin.routes.js";
 import employeeRoutes from "./routes/employee.routes.js";
 import paymentRoutes from "./routes/payment.routes.js";
 import placeRoutes from "./routes/place.routes.js";
+import orderRoutes from "./routes/order.routes.js";
 
 // Middleware
 import { errorHandler } from "./middleware/error.middleware.js";
@@ -61,6 +62,7 @@ app.use("/api/admin", adminRoutes);
 app.use("/api/employee", employeeRoutes);
 app.use("/api/payments", paymentRoutes);
 app.use("/api/places", placeRoutes);
+app.use("/api/orders", orderRoutes);
 
 // Error handling
 app.use(notFound);

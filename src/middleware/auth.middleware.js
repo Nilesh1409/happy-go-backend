@@ -9,10 +9,9 @@ export const protect = asyncHandler(async (req, res, next) => {
 
   // Log basic request details: Timestamp, HTTP method, endpoint, and IP address
   const requestTime = new Date();
-  // console.log(`API Request received at: ${requestTime.toISOString()}`);
-  // console.log(`Request Type: ${req.method}`);
-  // console.log(`Endpoint: ${req.originalUrl}`);
-  // console.log(`Requester IP: ${req.ip}`);
+  console.log(`API Request received at: ${requestTime.toISOString()}`);
+  console.log(`Request Type: ${req.method}`);
+  console.log(`Endpoint: ${req.originalUrl}`);
 
   // Check if token exists in headers
   if (
@@ -21,7 +20,6 @@ export const protect = asyncHandler(async (req, res, next) => {
   ) {
     token = req.headers.authorization.split(" ")[1];
   }
-  console.log("🚀 ~ protect ~ token:", token, req.headers);
 
   // Check if token exists
   if (!token) {
@@ -53,7 +51,8 @@ export const protect = asyncHandler(async (req, res, next) => {
     // If neither user nor employee found
     return next(new ApiError("User not found", 404));
   } catch (error) {
-    return next(new ApiError("Not authorized to access this route", 401));
+    console.error("Token verification error:", error.message);
+    return next(new ApiError("Authentication failed", 401));
   }
 });
 
