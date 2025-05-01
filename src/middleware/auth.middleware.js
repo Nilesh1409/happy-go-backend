@@ -12,6 +12,7 @@ export const protect = asyncHandler(async (req, res, next) => {
   console.log(`API Request received at: ${requestTime.toISOString()}`);
   console.log(`Request Type: ${req.method}`);
   console.log(`Endpoint: ${req.originalUrl}`);
+  console.log(`Endpoint: ${req.headers.authorization}`);
 
   // Check if token exists in headers
   if (
@@ -27,11 +28,15 @@ export const protect = asyncHandler(async (req, res, next) => {
   }
 
   try {
+    console.log("JWT_SECRET is:", !!process.env.JWT_SECRET);
+
     // Verify token
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    console.log("🚀 ~ protect ~ decoded:", decoded);
 
     // First check if it's a user
     const user = await User.findById(decoded.id).select("-password");
+    console.log("🚀 ~ protect ~ user:", user);
 
     if (user) {
       // Add user to request

@@ -1,4 +1,4 @@
-import mongoose from "mongoose"
+import mongoose from "mongoose";
 
 const bikeSchema = new mongoose.Schema(
   {
@@ -41,11 +41,19 @@ const bikeSchema = new mongoose.Schema(
           required: [true, "Please add a km limit"],
           default: 60,
         },
+        isActive: {
+          type: Boolean,
+          default: true,
+        },
       },
       unlimited: {
         price: {
           type: Number,
           required: [true, "Please add a price for unlimited km"],
+        },
+        isActive: {
+          type: Boolean,
+          default: true,
         },
       },
     },
@@ -89,13 +97,54 @@ const bikeSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    quantity: {
+      type: Number,
+      required: [true, "Please add quantity"],
+      default: 1,
+      min: [1, "Quantity must be at least 1"],
+    },
+    availableQuantity: {
+      type: Number,
+      default: function () {
+        return this.quantity;
+      },
+    },
+    maintenanceHistory: [
+      {
+        note: {
+          type: String,
+          required: true,
+        },
+        startDate: {
+          type: Date,
+          default: Date.now,
+        },
+        endDate: {
+          type: Date,
+        },
+        completedBy: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "Employee",
+        },
+        status: {
+          type: String,
+          enum: ["ongoing", "completed"],
+          default: "ongoing",
+        },
+      },
+    ],
+    status: {
+      type: String,
+      enum: ["available", "booked", "maintenance", "unavailable"],
+      default: "available",
+    },
   },
   {
     timestamps: true,
     toJSON: { virtuals: true },
     toObject: { virtuals: true },
-  },
-)
+  }
+);
 
 // Virtual for bike's bookings
 bikeSchema.virtual("bookings", {
@@ -103,12 +152,11 @@ bikeSchema.virtual("bookings", {
   localField: "_id",
   foreignField: "bike",
   justOne: false,
-})
+});
 
 // Create index for search
-bikeSchema.index({ title: "text", brand: "text", model: "text" })
+bikeSchema.index({ title: "text", brand: "text", model: "text" });
 
-const Bike = mongoose.model("Bike", bikeSchema)
+const Bike = mongoose.model("Bike", bikeSchema);
 
-export default Bike
-
+export default Bike;

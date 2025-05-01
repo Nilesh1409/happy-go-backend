@@ -80,6 +80,27 @@ export const createOrderPayment = asyncHandler(async (req, res) => {
     throw new ApiError("Payment already completed for this order", 400);
   }
 
+  if (process.env.NODE_ENV !== "production") {
+    console.log("Dev mode: skipping Razorpay, auto‑completing payment");
+    // mock‑complete:
+    const mockId = "mock_payment_" + Date.now();
+    order.paymentStatus = "completed";
+    order.paymentId = mockId;
+    order.orderStatus = "processing";
+    await order.save();
+    return res.status(200).json({
+      success: true,
+      message: "Development mode: Payment automatically marked as completed",
+      data: {
+        id: "mock_order_" + Date.now(),
+        amount: order.priceDetails.totalAmount * 100,
+        currency: "INR",
+        receipt: `order_${order._id}`,
+        orderId: order._id,
+      },
+    });
+  }
+
   // DEVELOPMENT MODE: Skip actual Razorpay integration
   if (
     !process.env.RAZORPAY_KEY_ID ||

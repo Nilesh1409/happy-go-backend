@@ -21,6 +21,8 @@ import employeeRoutes from "./routes/employee.routes.js";
 import paymentRoutes from "./routes/payment.routes.js";
 import placeRoutes from "./routes/place.routes.js";
 import orderRoutes from "./routes/order.routes.js";
+import uploadRoutes from "./routes/upload.routes.js";
+import simpleUploadRoutes from "./routes/simpleUpload.routes.js";
 
 // Middleware
 import { errorHandler } from "./middleware/error.middleware.js";
@@ -32,6 +34,7 @@ const app = express();
 const httpServer = createServer(app);
 
 // Security middleware
+app.set("trust proxy", 1);
 app.use(helmet());
 app.use(cors());
 app.use(express.json({ limit: "10mb" }));
@@ -63,6 +66,8 @@ app.use("/api/employee", employeeRoutes);
 app.use("/api/payments", paymentRoutes);
 app.use("/api/places", placeRoutes);
 app.use("/api/orders", orderRoutes);
+app.use("/api/upload", uploadRoutes);
+app.use("/api/simple-upload", simpleUploadRoutes);
 
 // Error handling
 app.use(notFound);

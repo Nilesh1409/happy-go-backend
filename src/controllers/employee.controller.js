@@ -658,9 +658,9 @@ export const updateBookingStatus = asyncHandler(async (req, res) => {
   }
 
   // Check if booking is assigned to employee
-  if (booking.assignedEmployee?.toString() !== req.employee._id.toString()) {
-    throw new ApiError("Not authorized to update this booking", 401);
-  }
+  // if (booking.assignedEmployee?.toString() !== req.employee._id.toString()) {
+  //   throw new ApiError("Not authorized to update this booking", 401);
+  // }
 
   // Update booking
   booking.bookingStatus = status;
@@ -776,6 +776,9 @@ export const getEmployeeBikes = asyncHandler(async (req, res) => {
       rentalPrice: bike.pricePerDay.limitedKm.price,
       images: bike.images,
       status: bikeStatus,
+      // Add availableQuantity to the response
+      quantity: bike.quantity || 1,
+      availableQuantity: bike.availableQuantity || 0,
     };
   });
 

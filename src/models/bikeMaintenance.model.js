@@ -9,23 +9,28 @@ const bikeMaintenanceSchema = new mongoose.Schema(
     },
     note: {
       type: String,
-      required: [true, "Please add maintenance details"],
+      required: [true, "Please add a maintenance note"],
     },
-    createdBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Employee",
-      required: true,
+    startDate: {
+      type: Date,
+      default: Date.now,
     },
-    completed: {
-      type: Boolean,
-      default: false,
+    endDate: {
+      type: Date,
     },
     completedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Employee",
     },
-    completedAt: {
-      type: Date,
+    status: {
+      type: String,
+      enum: ["ongoing", "completed"],
+      default: "ongoing",
+    },
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Employee",
+      required: true,
     },
   },
   {
@@ -33,9 +38,9 @@ const bikeMaintenanceSchema = new mongoose.Schema(
   }
 );
 
-const BikeMaintenanceRecord = mongoose.model(
-  "BikeMaintenanceRecord",
+const BikeMaintenance = mongoose.model(
+  "BikeMaintenance",
   bikeMaintenanceSchema
 );
 
-export default BikeMaintenanceRecord;
+export default BikeMaintenance;

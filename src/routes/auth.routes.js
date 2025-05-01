@@ -6,6 +6,7 @@ import {
   verifyMobileOTP,
   loginUser,
   getMe,
+  // updateProfile,
 } from "../controllers/auth.controller.js";
 import { protect } from "../middleware/auth.middleware.js";
 
