@@ -282,6 +282,7 @@ export const getEmployeeBookings = asyncHandler(async (req, res) => {
   // Build query based on employee's assigned modules
   const query = {};
 
+  console.log("🚀 ~ getEmployeeBookings ~ type:", type);
   // Filter by employee's assigned modules if type is not specified
   if (type) {
     // If specific type is requested, check if employee has access to it
@@ -294,6 +295,7 @@ export const getEmployeeBookings = asyncHandler(async (req, res) => {
     query.bookingType = { $in: req.employee.assignedModules };
   }
 
+  console.log("🚀 ~ getEmployeeBookings ~ query:", query);
   // Filter by status if provided
   if (status && status !== "all") {
     query.bookingStatus = status.toLowerCase();
@@ -301,17 +303,19 @@ export const getEmployeeBookings = asyncHandler(async (req, res) => {
 
   // Filter by date range if provided
   if (startDate || endDate) {
-    query.$or = [];
+    const sd = startDate ? new Date(startDate) : null;
+    const ed = endDate ? new Date(endDate) : null;
 
-    const dateQuery = {};
-    if (startDate) {
-      dateQuery.startDate = { $gte: new Date(startDate) };
+    if (sd && ed) {
+      // Overlap: booking.startDate ≤ ed  AND  booking.endDate ≥ sd
+      query.$and = [{ startDate: { $lte: ed } }, { endDate: { $gte: sd } }];
+    } else if (sd) {
+      // Only a lower‐bound: any booking whose endDate ≥ sd
+      query.endDate = { $gte: sd };
+    } else if (ed) {
+      // Only an upper‐bound: any booking whose startDate ≤ ed
+      query.startDate = { $lte: ed };
     }
-    if (endDate) {
-      dateQuery.endDate = { $lte: new Date(endDate) };
-    }
-
-    query.$or.push(dateQuery);
   }
 
   // Count total documents
@@ -652,17 +656,11 @@ export const updateBookingStatus = asyncHandler(async (req, res) => {
 
   // Get booking
   const booking = await Booking.findById(req.params.id);
-
   if (!booking) {
     throw new ApiError("Booking not found", 404);
   }
 
-  // Check if booking is assigned to employee
-  // if (booking.assignedEmployee?.toString() !== req.employee._id.toString()) {
-  //   throw new ApiError("Not authorized to update this booking", 401);
-  // }
-
-  // Update booking
+  // Update bookingStatus
   booking.bookingStatus = status;
 
   // For bike bookings, update additional details
@@ -672,24 +670,98 @@ export const updateBookingStatus = asyncHandler(async (req, res) => {
     }
 
     if (status === "completed") {
+      // ‣ require finalKmReading
       if (!finalKmReading) {
         throw new ApiError("Please provide final km reading", 400);
       }
-
       booking.bikeDetails.finalKmReading = finalKmReading;
 
-      // Calculate additional charges if any
+      // ‣ calculate any extra charges
       if (additionalCharges) {
         booking.bikeDetails.additionalCharges = additionalCharges;
       }
+
+      // → set endTime to current time (HH:mm)
+      const now = new Date();
+      const hh = String(now.getHours()).padStart(2, "0");
+      const mm = String(now.getMinutes()).padStart(2, "0");
+      booking.endTime = `${hh}:${mm}`;
     }
+  }
+
+  if (status === "completed") {
+    // 1. Capture “now”:
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    const day = String(now.getDate()).padStart(2, "0");
+    const hh = String(now.getHours()).padStart(2, "0");
+    const mm = String(now.getMinutes()).padStart(2, "0");
+
+    // 2. Set booking.endDate = today’s date, booking.endTime = current time
+    booking.endDate = new Date(`${year}-${month}-${day}`); // a Date at midnight of today; exact-time is in endTime
+    booking.endTime = `${hh}:${mm}`;
+
+    // 3. Build a Date object for the original scheduled endDate+endTime
+    //    (use the *previous* values of booking.endDate/endTime, before you overwrote them).
+    //    So, store the old values first:
+    const oldEndDateOnly = booking.get("endDate", { getters: false }); // this is the Date field just before we overwrote it
+    const oldEndTimeString = booking.get("endTime", { getters: false }); // e.g. "18:30"
+
+    // Parse the oldEndTimeString into hours/minutes:
+    let scheduledEnd = null;
+    if (oldEndDateOnly && oldEndTimeString) {
+      const [oldHour, oldMinute] = oldEndTimeString
+        .split(":")
+        .map((s) => parseInt(s, 10));
+      scheduledEnd = new Date(oldEndDateOnly);
+      scheduledEnd.setHours(oldHour, oldMinute, 0, 0);
+    }
+
+    // 4. If “now” > scheduledEnd, calculate extraDays and extraHours
+    let isLate = false;
+    let extraDays = 0;
+    let extraHours = 0;
+
+    if (scheduledEnd && now > scheduledEnd) {
+      isLate = true;
+      const diffMs = now.getTime() - scheduledEnd.getTime();
+
+      // compute total full days
+      extraDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+      // subtract those days, then compute leftover hours
+      const remainingAfterDays = diffMs - extraDays * (1000 * 60 * 60 * 24);
+      extraHours = Math.floor(remainingAfterDays / (1000 * 60 * 60));
+    }
+
+    // 5. Set booking.overdueInfo
+    booking.overdueInfo = {
+      actualReturnDate: now,
+      extraDays: isLate ? extraDays : 0,
+      extraHours: isLate ? extraHours : 0,
+      // If you have a per-hour or per-day charge, compute it here:
+      // overdueCharges: isLate ? (extraDays * DAY_RATE + extraHours * HOUR_RATE) : 0,
+    };
+
+    // (Optionally, you could also add a “lateMessage” field on booking if you want it stored in Mongo)
+    // For now, we’ll return it in the response JSON.
   }
 
   await booking.save();
 
+  let lateBy = null;
+  if (
+    status === "completed" &&
+    booking.overdueInfo?.extraDays + booking.overdueInfo?.extraHours > 0
+  ) {
+    lateBy = `${booking.overdueInfo.extraDays} day(s) and ${booking.overdueInfo.extraHours} hour(s)`;
+  }
+
   res.status(200).json({
     success: true,
     data: booking,
+    lateBy,
   });
 });
 
@@ -735,36 +807,47 @@ export const updateOrderStatus = asyncHandler(async (req, res) => {
 export const getEmployeeBikes = asyncHandler(async (req, res) => {
   const { status } = req.query;
 
-  // Build query based on status filter
-  const query = {};
+  // 1. Fetch all bikes
+  const bikes = await Bike.find({}).lean();
 
-  // Get all bikes with their booking status
-  const bikes = await Bike.find(query);
-
-  // Get current bookings to determine which bikes are booked
-  const currentBookings = await Booking.find({
+  // 2. Fetch any bookings that span "now"
+  const now = new Date();
+  const activeBookings = await Booking.find({
     bookingType: "bike",
     bookingStatus: { $in: ["confirmed", "pending"] },
-    startDate: { $lte: new Date() },
-    endDate: { $gte: new Date() },
-  }).select("bike");
+    startDate: { $lte: now },
+    endDate: { $gte: now },
+  })
+    .select("bike endDate endTime")
+    .lean();
 
-  // Create a set of booked bike IDs for faster lookup
-  const bookedBikeIds = new Set(
-    currentBookings.map((booking) => booking.bike.toString())
-  );
+  // 3. Group end-times by bike ID
+  const bookingMap = activeBookings.reduce((map, bk) => {
+    const id = bk.bike.toString();
+    const [eh, em] = bk.endTime.split(":").map(Number);
+    const endDt = new Date(bk.endDate);
+    endDt.setHours(eh, em, 0, 0);
+    map[id] = map[id] || [];
+    map[id].push(endDt);
+    return map;
+  }, {});
 
-  // Format response with correct status
-  const formattedBikes = bikes.map((bike) => {
+  // 4. Format each bike with real availability & nextAvailable
+  const formatted = bikes.map((bike) => {
+    const id = bike._id.toString();
+    const total = bike.quantity ?? 1;
+    const bookedEnds = bookingMap[id] || [];
+    const bookedCount = bookedEnds.length;
+    const availQty = Math.max(0, total - bookedCount);
+
     let bikeStatus = "available";
+    if (!bike.isAvailable) bikeStatus = "maintenance";
+    else if (availQty === 0) bikeStatus = "booked";
 
-    // Check if bike is in maintenance
-    if (!bike.isAvailable) {
-      bikeStatus = "maintenance";
-    }
-    // Check if bike is currently booked
-    else if (bookedBikeIds.has(bike._id.toString())) {
-      bikeStatus = "booked";
+    let nextAvailable = null;
+    if (availQty === 0 && bookedEnds.length > 0) {
+      const earliestMs = Math.min(...bookedEnds.map((d) => d.getTime()));
+      nextAvailable = new Date(earliestMs).toISOString();
     }
 
     return {
@@ -776,21 +859,21 @@ export const getEmployeeBikes = asyncHandler(async (req, res) => {
       rentalPrice: bike.pricePerDay.limitedKm.price,
       images: bike.images,
       status: bikeStatus,
-      // Add availableQuantity to the response
-      quantity: bike.quantity || 1,
-      availableQuantity: bike.availableQuantity || 0,
+      quantity: total,
+      availableQuantity: availQty,
+      ...(nextAvailable && { nextAvailable }),
     };
   });
 
-  // Apply status filter if provided
-  let filteredBikes = formattedBikes;
-  if (status && status !== "all") {
-    filteredBikes = formattedBikes.filter((bike) => bike.status === status);
-  }
+  // 5. Apply query-param filter if any
+  const data =
+    status && status !== "all"
+      ? formatted.filter((b) => b.status === status)
+      : formatted;
 
   res.status(200).json({
     success: true,
-    data: filteredBikes,
+    data,
   });
 });
 
@@ -799,24 +882,35 @@ export const getEmployeeBikes = asyncHandler(async (req, res) => {
 // @access  Private/Employee
 export const getEmployeeBikeById = asyncHandler(async (req, res) => {
   const bike = await Bike.findById(req.params.id);
+  if (!bike) throw new ApiError("Bike not found", 404);
 
-  if (!bike) {
-    throw new ApiError("Bike not found", 404);
-  }
-
-  // Format response
+  // Format response for edit form
   const formattedBike = {
     _id: bike._id,
     title: bike.title,
+    brand: bike.brand, // for your Brand input
     model: bike.model,
-    bikeId: bike.registrationNumber,
-    category: bike.brand,
-    rentalPrice: bike.pricePerDay.limitedKm.price,
+    year: bike.year,
     description: bike.description,
+    bikeId: bike.registrationNumber,
     location: bike.location,
     features: bike.features,
+    requiredDocuments: bike.requiredDocuments,
+    quantity: bike.quantity,
     images: bike.images,
     status: bike.isAvailable ? "available" : "maintenance",
+    pricePerDay: {
+      limitedKm: {
+        price: bike.pricePerDay.limitedKm.price,
+        kmLimit: bike.pricePerDay.limitedKm.kmLimit,
+        isActive: bike.pricePerDay.limitedKm.isActive,
+      },
+      unlimited: {
+        price: bike.pricePerDay.unlimited.price,
+        isActive: bike.pricePerDay.unlimited.isActive,
+      },
+    },
+    additionalKmPrice: bike.additionalKmPrice,
   };
 
   res.status(200).json({
@@ -897,34 +991,58 @@ export const updateBike = asyncHandler(async (req, res) => {
     model,
     bikeId,
     category,
-    rentalPrice,
     description,
     location,
     features,
     images,
     status,
+    quantity,
+    year,
+    requiredDocuments,
+    pricePerDay, // ← NEW
+    additionalKmPrice, // ← NEW
   } = req.body;
 
   const bike = await Bike.findById(req.params.id);
+  if (!bike) throw new ApiError("Bike not found", 404);
 
-  if (!bike) {
-    throw new ApiError("Bike not found", 404);
-  }
-
-  // Update fields
+  // Update scalar fields
   if (title) bike.title = title;
   if (model) bike.model = model;
   if (bikeId) bike.registrationNumber = bikeId;
   if (category) bike.brand = category;
-  if (rentalPrice) {
-    bike.pricePerDay.limitedKm.price = Number(rentalPrice);
-    bike.pricePerDay.unlimited.price = Number(rentalPrice) * 1.5;
-  }
   if (description) bike.description = description;
   if (location) bike.location = location;
   if (features) bike.features = features;
   if (images) bike.images = images;
   if (status) bike.isAvailable = status === "available";
+  if (quantity !== undefined) bike.quantity = Number(quantity);
+  if (year) bike.year = Number(year);
+  if (requiredDocuments) bike.requiredDocuments = requiredDocuments;
+
+  // Update pricing
+  if (pricePerDay) {
+    const { limitedKm, unlimited } = pricePerDay;
+    if (limitedKm) {
+      if (limitedKm.price !== undefined)
+        bike.pricePerDay.limitedKm.price = Number(limitedKm.price);
+      if (limitedKm.kmLimit !== undefined)
+        bike.pricePerDay.limitedKm.kmLimit = Number(limitedKm.kmLimit);
+      if (limitedKm.isActive !== undefined)
+        bike.pricePerDay.limitedKm.isActive = Boolean(limitedKm.isActive);
+    }
+    if (unlimited) {
+      if (unlimited.price !== undefined)
+        bike.pricePerDay.unlimited.price = Number(unlimited.price);
+      if (unlimited.isActive !== undefined)
+        bike.pricePerDay.unlimited.isActive = Boolean(unlimited.isActive);
+    }
+  }
+
+  // Update additional km price if provided
+  if (additionalKmPrice !== undefined) {
+    bike.additionalKmPrice = Number(additionalKmPrice);
+  }
 
   await bike.save();
 

@@ -4,6 +4,7 @@ import BikeMaintenance from "../models/bikeMaintenance.model.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import { deleteFromS3, processAndUploadImages } from "../utils/s3.js";
+import { calculateExtraAmount } from "../utils/bikePricing.js";
 
 // @desc    Get all bikes
 // @route   GET /api/bikes
@@ -164,7 +165,7 @@ export const getAvailableBikes = asyncHandler(async (req, res) => {
 
   const rawBookings = await Booking.find({
     bookingType: "bike",
-    bookingStatus: { $in: ["pending", "confirmed"] },
+    bookingStatus: { $in: ["confirmed"] },
     startDate: { $lte: endDateOnly },
     endDate: { $gte: startDateOnly },
   });
@@ -187,7 +188,7 @@ export const getAvailableBikes = asyncHandler(async (req, res) => {
     }
     return map;
   }, {});
-  console.log("🚀 ~ bookingsByBike ~ rawBookings:", rawBookings);
+  // console.log("🚀 ~ bookingsByBike ~ rawBookings:", rawBookings);
 
   // 6. Process each bike and determine availability
   const result = bikes.map((bike) => {
@@ -199,10 +200,31 @@ export const getAvailableBikes = asyncHandler(async (req, res) => {
 
     if (count < total) {
       // Bike is available
+
+      // Extra charges for early pick or late drop-off
+      let extraAmount = 0;
+
+      try {
+        const pricing = calculateExtraAmount({
+          bike,
+          startTime,
+          endTime,
+        });
+        // console.log("🚀 ~ result ~ pricing:", pricing);
+        // pricing.extraAmount = earlyPickupFee + lateDropFee
+        extraAmount = pricing;
+      } catch (err) {
+        console.log("🚀 ~ result ~ err:", err);
+        // If, e.g., unlimited mode was requested but isInactive, or any error:
+        // swallow and leave extraAmount = 0.
+        extraAmount = 0;
+      }
+
       return {
         ...bike.toObject(),
         isAvailable: true,
         availableUnits: total - count,
+        extraAmount: extraAmount,
       };
     } else {
       // Bike is unavailable, calculate next available time
@@ -221,6 +243,8 @@ export const getAvailableBikes = asyncHandler(async (req, res) => {
       };
     }
   });
+
+  console.log("result", result);
 
   // 7. Return the result
   res.status(200).json({
@@ -356,7 +380,7 @@ export const getBikes = asyncHandler(async (req, res) => {
   // Get current bookings to determine actual available quantities
   const currentBookings = await Booking.find({
     bookingType: "bike",
-    bookingStatus: { $in: ["confirmed", "pending"] },
+    bookingStatus: { $in: ["confirmed"] },
     startDate: { $lte: new Date() },
     endDate: { $gte: new Date() },
   }).select("bike");
@@ -391,6 +415,7 @@ export const getBikes = asyncHandler(async (req, res) => {
 
 // Update the getBike function to ensure availableQuantity is included in the response
 export const getBike = asyncHandler(async (req, res) => {
+  const { startDate, startTime, endDate, endTime } = req.query;
   const bike = await Bike.findById(req.params.id);
 
   if (!bike) {
@@ -408,6 +433,14 @@ export const getBike = asyncHandler(async (req, res) => {
 
   // Create a response object with accurate available quantity
   const bikeResponse = bike.toObject();
+
+  console.log("🚀 ~ getBike ~ startTime:", startTime, endTime);
+  const pricing = calculateExtraAmount({
+    bike,
+    startTime,
+    endTime,
+  });
+  bikeResponse.extraAmount = pricing;
 
   // Ensure availableQuantity is never negative
   bikeResponse.availableQuantity = Math.max(

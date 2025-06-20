@@ -39,7 +39,8 @@ router.put(
   employeeProtect,
   calculateAdditionalCharges
 );
-router.put("/:id/extend", employeeProtect, extendBikeBooking);
+router.put("/:id/extend/user", protect, extendBikeBooking);
+router.put("/:id/extend/employee", employeeProtect, extendBikeBooking);
 router.put("/:id/complete", employeeProtect, completeBikeBooking);
 
 // Admin routes

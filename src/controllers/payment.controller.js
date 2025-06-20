@@ -59,6 +59,68 @@ export const createBookingPayment = asyncHandler(async (req, res) => {
   });
 });
 
+export const createExtendBookingPayment = asyncHandler(async (req, res) => {
+  // 1. Fetch the booking from DB
+  const booking = await Booking.findById(req.params.id);
+
+  if (!booking) {
+    throw new ApiError("Booking not found", 404);
+  }
+
+  // 2. Ensure the booking belongs to the logged‐in user
+  if (booking.user.toString() !== req.user._id.toString()) {
+    throw new ApiError("Not authorized to access this booking", 401);
+  }
+
+  // 3. Check if there is at least one extension entry in extensionHistory
+  if (!booking.extensionHistory || booking.extensionHistory.length === 0) {
+    throw new ApiError("No extension found for this booking", 400);
+  }
+
+  // 4. Grab the **latest** extension record
+  const lastExtension =
+    booking.extensionHistory[booking.extensionHistory.length - 1];
+
+  // 5. If the additionalAmount from the last extension is zero (or missing), nothing to pay
+  const additionalAmount = Number(lastExtension.additionalAmount || 0);
+  if (additionalAmount <= 0) {
+    throw new ApiError(
+      "No additional payment is required for this extension",
+      400
+    );
+  }
+
+  // 6. Create a Razorpay order for exactly that extra amount
+  const razorpayOptions = {
+    amount: additionalAmount * 100, // in paise (₹ → paise)
+    currency: "INR",
+    receipt: `extension_${booking._id}_${Date.now()}`, // e.g. extension_60f0b0a1d48abc1234567890_1627672800000
+    payment_capture: 1, // auto capture
+  };
+
+  // If you have a Razorpay instance, you’d do:
+  // const order = await razorpay.orders.create(razorpayOptions);
+  //
+  // For demonstration, we’ll return a placeholder:
+  //    id: order.id
+  //    amount: order.amount
+  //    currency: order.currency
+  //    receipt: order.receipt
+
+  // 7. Return the Order payload
+  res.status(200).json({
+    success: true,
+    data: {
+      id: "order.id", // <-- replace with `order.id` from Razorpay
+      amount: "order.amount", // <-- replace with `order.amount`
+      currency: "order.currency", // <-- replace with `order.currency`
+      receipt: "order.receipt", // <-- replace with `order.receipt`
+      bookingId: booking._id,
+      extensionId: lastExtension._id, // if you need to track which extension was paid
+      amountToPay: additionalAmount, // (in ₹)
+    },
+  });
+});
 // @desc    Create payment order for product order
 // @route   POST /api/payments/order/:id
 // @access  Private

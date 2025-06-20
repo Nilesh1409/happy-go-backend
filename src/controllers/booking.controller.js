@@ -36,6 +36,7 @@ export const createBooking = asyncHandler(async (req, res) => {
 
   // Validate required fields based on booking type
   if (bookingType === "bike") {
+    // 2. Validate required bike fields
     if (
       !bikeId ||
       !startDate ||
@@ -45,49 +46,90 @@ export const createBooking = asyncHandler(async (req, res) => {
       !bikeDetails
     ) {
       throw new ApiError(
-        "Please provide all required fields for bike booking",
+        "Please provide bikeId, startDate, endDate, startTime, endTime and bikeDetails",
         400
       );
     }
 
-    // Check if bike exists
+    // 3. Fetch bike document
     const bike = await Bike.findById(bikeId);
     if (!bike) {
       throw new ApiError("Bike not found", 404);
     }
 
-    console.log("🚀 ~ createBooking ~ bike:", bike);
-    // Check if bike is available
-    if (bike.status !== "available" || bike.availableQuantity <= 0) {
-      throw new ApiError("Bike is not available for booking", 400);
+    // 4. Parse requested start/end as Date objects
+    //    We assume startDate/endDate are ISO date‐only strings: "YYYY-MM-DD"
+    //    and startTime/endTime are "HH:mm"
+    const startRequested = new Date(`${startDate}T${startTime}:00`);
+    const endRequested = new Date(`${endDate}T${endTime}:00`);
+
+    if (isNaN(startRequested) || isNaN(endRequested)) {
+      throw new ApiError("Invalid date or time format", 400);
+    }
+    if (startRequested >= endRequested) {
+      throw new ApiError("Start date/time must be before end date/time", 400);
     }
 
-    // Check if bike is available for the selected dates
-    const existingBookings = await Booking.find({
+    // 5. Build a query to load all existing bike bookings that could overlap
+    //    with the requested date‐range (date‐only portion, inclusive)
+    const startDateOnly = new Date(startDate);
+    startDateOnly.setHours(0, 0, 0, 0);
+    const endDateOnly = new Date(endDate);
+    endDateOnly.setHours(23, 59, 59, 999);
+
+    const rawBookings = await Booking.find({
       bookingType: "bike",
       bike: bikeId,
-      $or: [
-        {
-          startDate: { $lte: new Date(endDate) },
-          endDate: { $gte: new Date(startDate) },
-        },
-      ],
-      bookingStatus: { $nin: ["cancelled"] },
-    });
+      bookingStatus: { $in: ["confirmed"] },
+      startDate: { $lte: endDateOnly },
+      endDate: { $gte: startDateOnly },
+    }).select("startDate endDate startTime endTime bike"); // only pull fields we need
 
-    // Count how many bikes are already booked for this period
-    if (existingBookings.length >= bike.availableQuantity) {
-      throw new ApiError("Bike is not available for the selected dates", 400);
+    // 6. Group those bookings by bikeId (though here it's always one bikeId)
+    const bookingsByBike = rawBookings.reduce((map, bk) => {
+      // Build actual Date objects for the existing booking's start/end
+      const bStart = new Date(bk.startDate);
+      const [sh, sm] = bk.startTime.split(":").map(Number);
+      bStart.setHours(sh, sm, 0, 0);
+
+      const bEnd = new Date(bk.endDate);
+      const [eh, em] = bk.endTime.split(":").map(Number);
+      bEnd.setHours(eh, em, 0, 0);
+
+      // Inclusive overlap check:
+      //    (bStart <= endRequested) && (bEnd >= startRequested)
+      if (bStart <= endRequested && bEnd >= startRequested) {
+        const idStr = bk.bike.toString();
+        if (!map[idStr]) map[idStr] = [];
+        map[idStr].push({ start: bStart, end: bEnd });
+      }
+      return map;
+    }, {});
+
+    // 7. Determine how many units of this bike type are already overlapping
+    const bikeIdStr = bike._id.toString();
+    const overlappingBookings = bookingsByBike[bikeIdStr] || [];
+    const alreadyBookedCount = overlappingBookings.length;
+    const totalUnits = bike.quantity; // assume "quantity" is total copies/units available
+    console.log(
+      "🚀 ~ createBooking ~ totalUnits = bike.quantity;:",
+      totalUnits,
+      alreadyBookedCount,
+      bookingsByBike
+    );
+
+    if (alreadyBookedCount >= totalUnits) {
+      // No unit free for the requested date+time window
+      throw new ApiError("Bike is not available for the selected period", 400);
     }
 
-    // Validate pricing option
+    // 8. Validate pricing options (unlimited vs limitedKm)
     if (bikeDetails.isUnlimited && !bike.pricePerDay.unlimited.isActive) {
       throw new ApiError(
         "Unlimited km option is not available for this bike",
         400
       );
     }
-
     if (!bikeDetails.isUnlimited && !bike.pricePerDay.limitedKm.isActive) {
       throw new ApiError(
         "Limited km option is not available for this bike",
@@ -95,15 +137,89 @@ export const createBooking = asyncHandler(async (req, res) => {
       );
     }
 
-    // Decrease available quantity
-    bike.availableQuantity -= 1;
-
-    // If all bikes are booked, update status
-    if (bike.availableQuantity === 0) {
-      bike.status = "booked";
+    // 9. Calculate extra charges for early pickup / late drop‐off
+    let extraAmount = 0;
+    try {
+      const pricing = calculateExtraAmount({
+        bike,
+        startTime,
+        endTime,
+      });
+      extraAmount = pricing || 0;
+    } catch (err) {
+      // If calculateExtraAmount throws (e.g. invalid state), swallow and continue with extraAmount = 0
+      console.warn("calculateExtraAmount error:", err.message);
+      extraAmount = 0;
     }
 
+    // 10. Decrement availableQuantity and possibly update status
+    bike.availableQuantity = bike.availableQuantity - 1;
+    if (bike.availableQuantity <= 0) {
+      bike.status = "booked";
+    }
     await bike.save();
+
+    // 11. Build the booking document now that availability is confirmed
+    const booking = await Booking.create({
+      user: req.user._id,
+      bookingType: "bike",
+      bike: bikeId,
+      hotel: undefined,
+      roomType: undefined,
+      startDate,
+      endDate,
+      startTime,
+      endTime,
+      numberOfPeople: undefined,
+      // priceDetails: assume the client already calculated basePrice.
+      // You can also add `extraAmount` here or recompute total on server:
+      priceDetails: {
+        ...priceDetails,
+        extraAmount,
+        totalAmount: (priceDetails.totalAmount || 0) + extraAmount,
+      },
+      bikeDetails,
+      hotelDetails: undefined,
+      couponCode,
+      specialRequests,
+      guestDetails,
+      bookingStatus: "pending",
+    });
+
+    // 12. Send confirmation email & SMS
+    const user = await User.findById(req.user._id).select("name email mobile");
+    const emailMessage = `
+      <h1>Bike Booking Confirmation</h1>
+      <p>Dear ${user.name},</p>
+      <p>Your bike booking has been confirmed.</p>
+      <p>Booking ID: ${booking._id}</p>
+      <p>Start: ${new Date(
+        startDate + "T" + startTime + ":00"
+      ).toLocaleString()}</p>
+      <p>End: ${new Date(endDate + "T" + endTime + ":00").toLocaleString()}</p>
+      <p>Extra Charges: ₹${extraAmount.toFixed(2)}</p>
+      <p>Total Amount: ₹${(
+        (priceDetails.totalAmount || 0) + extraAmount
+      ).toFixed(2)}</p>
+      <p>Thank you for choosing HappyGo!</p>
+    `;
+    await sendEmail({
+      email: user.email,
+      subject: "HappyGo Bike Booking Confirmation",
+      message: emailMessage,
+    });
+
+    const smsMessage = `Your HappyGo bike booking is confirmed (ID: ${
+      booking._id
+    }). Total: ₹${((priceDetails.totalAmount || 0) + extraAmount).toFixed(
+      2
+    )}. Thank you!`;
+    // await sendSMS({ phone: user.mobile, message: smsMessage });
+
+    return res.status(201).json({
+      success: true,
+      data: booking,
+    });
   } else if (bookingType === "hotel") {
     if (
       !hotelId ||
@@ -750,6 +866,10 @@ export const extendBikeBooking = asyncHandler(async (req, res) => {
     throw new ApiError("Only confirmed bookings can be extended", 400);
   }
 
+  if (booking.user.toString() !== req.user._id.toString() && !req?.employee) {
+    throw new ApiError("Not authorized to extend this booking", 401);
+  }
+
   // Check if new end date is after current end date
   const currentEndDate = new Date(
     `${booking.endDate.toISOString().split("T")[0]}T${booking.endTime}`
@@ -778,6 +898,11 @@ export const extendBikeBooking = asyncHandler(async (req, res) => {
   });
 
   if (conflictingBookings.length >= bike.availableQuantity) {
+    console.log(
+      "🚀 ~ extendBikeBooking ~ conflictingBookings:",
+      conflictingBookings.length,
+      bike.availableQuantity
+    );
     throw new ApiError("Bike is not available for the extended period", 400);
   }
 
@@ -822,7 +947,7 @@ export const extendBikeBooking = asyncHandler(async (req, res) => {
     newEndTime,
     additionalAmount,
     reason,
-    extendedBy: req.employee._id,
+    extendedBy: req?.employee?._id || req?.user?._id,
     extendedAt: new Date(),
   });
 
