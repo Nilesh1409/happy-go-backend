@@ -16,6 +16,29 @@ const configureAWS = () => {
   return new AWS.S3();
 };
 
+export const uploadToS3Image = async ({ buffer, fileName, contentType }) => {
+  const params = {
+    Bucket: process.env.S3_BUCKET_NAME,
+    Key: fileName,
+    Body: buffer,
+    ContentType: contentType,
+    ACL: "private", // Ensure private access
+  };
+
+  await s3.upload(params).promise();
+  return fileName; // Return the key
+};
+
+export const getSignedUrl = (key, expires = 3600) => {
+  const params = {
+    Bucket: process.env.S3_BUCKET_NAME,
+    Key: key,
+    Expires: expires,
+  };
+
+  return s3.getSignedUrl("getObject", params);
+};
+
 /**
  * Upload a file to S3
  * @param {string} base64Data - Base64 encoded file data

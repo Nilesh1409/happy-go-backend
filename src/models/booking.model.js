@@ -96,7 +96,7 @@ const bookingSchema = new mongoose.Schema(
     },
     bikeDetails: {
       kmLimit: {
-        type: Number,
+        type: mongoose.Schema.Types.Mixed,
         required: function () {
           return this.bookingType === "bike";
         },
