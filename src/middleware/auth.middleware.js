@@ -9,10 +9,10 @@ export const protect = asyncHandler(async (req, res, next) => {
 
   // Log basic request details: Timestamp, HTTP method, endpoint, and IP address
   const requestTime = new Date();
-  // console.log(`API Request received at: ${requestTime.toISOString()}`);
-  // console.log(`Request Type: ${req.method}`);
-  // console.log(`Endpoint: ${req.originalUrl}`);
-  // console.log(`Requester IP: ${req.ip}`);
+  console.log(`API Request received at: ${requestTime.toISOString()}`);
+  console.log(`Request Type: ${req.method}`);
+  console.log(`Endpoint: ${req.originalUrl}`);
+  console.log(`Endpoint: ${req.headers.authorization}`);
 
   // Check if token exists in headers
   if (
@@ -21,7 +21,6 @@ export const protect = asyncHandler(async (req, res, next) => {
   ) {
     token = req.headers.authorization.split(" ")[1];
   }
-  console.log("🚀 ~ protect ~ token:", token, req.headers);
 
   // Check if token exists
   if (!token) {
@@ -29,11 +28,15 @@ export const protect = asyncHandler(async (req, res, next) => {
   }
 
   try {
+    console.log("JWT_SECRET is:", !!process.env.JWT_SECRET);
+
     // Verify token
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    console.log("🚀 ~ protect ~ decoded:", decoded);
 
     // First check if it's a user
     const user = await User.findById(decoded.id).select("-password");
+    console.log("🚀 ~ protect ~ user:", user);
 
     if (user) {
       // Add user to request
@@ -53,7 +56,8 @@ export const protect = asyncHandler(async (req, res, next) => {
     // If neither user nor employee found
     return next(new ApiError("User not found", 404));
   } catch (error) {
-    return next(new ApiError("Not authorized to access this route", 401));
+    console.error("Token verification error:", error.message);
+    return next(new ApiError("Authentication failed", 401));
   }
 });
 

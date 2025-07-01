@@ -5,6 +5,7 @@ import User from "../models/user.model.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import { sendEmail } from "../utils/sendEmail.js";
+// const mongoose = require("mongoose");
 
 // @desc    Create new booking
 // @route   POST /api/bookings
@@ -25,6 +26,7 @@ export const createBooking = asyncHandler(async (req, res) => {
     hotelDetails,
     couponCode,
     specialRequests,
+    guestDetails,
   } = req.body;
 
   // Validate booking type
@@ -34,6 +36,7 @@ export const createBooking = asyncHandler(async (req, res) => {
 
   // Validate required fields based on booking type
   if (bookingType === "bike") {
+    // 2. Validate required bike fields
     if (
       !bikeId ||
       !startDate ||
@@ -43,33 +46,180 @@ export const createBooking = asyncHandler(async (req, res) => {
       !bikeDetails
     ) {
       throw new ApiError(
-        "Please provide all required fields for bike booking",
+        "Please provide bikeId, startDate, endDate, startTime, endTime and bikeDetails",
         400
       );
     }
 
-    // Check if bike exists
+    // 3. Fetch bike document
     const bike = await Bike.findById(bikeId);
     if (!bike) {
       throw new ApiError("Bike not found", 404);
     }
 
-    // Check if bike is available
-    const existingBookings = await Booking.find({
+    // 4. Parse requested start/end as Date objects
+    //    We assume startDate/endDate are ISO date‐only strings: "YYYY-MM-DD"
+    //    and startTime/endTime are "HH:mm"
+    const startRequested = new Date(`${startDate}T${startTime}:00`);
+    const endRequested = new Date(`${endDate}T${endTime}:00`);
+
+    if (isNaN(startRequested) || isNaN(endRequested)) {
+      throw new ApiError("Invalid date or time format", 400);
+    }
+    if (startRequested >= endRequested) {
+      throw new ApiError("Start date/time must be before end date/time", 400);
+    }
+
+    // 5. Build a query to load all existing bike bookings that could overlap
+    //    with the requested date‐range (date‐only portion, inclusive)
+    const startDateOnly = new Date(startDate);
+    startDateOnly.setHours(0, 0, 0, 0);
+    const endDateOnly = new Date(endDate);
+    endDateOnly.setHours(23, 59, 59, 999);
+
+    const rawBookings = await Booking.find({
       bookingType: "bike",
       bike: bikeId,
-      $or: [
-        {
-          startDate: { $lte: new Date(endDate) },
-          endDate: { $gte: new Date(startDate) },
-        },
-      ],
-      bookingStatus: { $nin: ["cancelled"] },
+      bookingStatus: { $in: ["confirmed"] },
+      startDate: { $lte: endDateOnly },
+      endDate: { $gte: startDateOnly },
+    }).select("startDate endDate startTime endTime bike"); // only pull fields we need
+
+    // 6. Group those bookings by bikeId (though here it's always one bikeId)
+    const bookingsByBike = rawBookings.reduce((map, bk) => {
+      // Build actual Date objects for the existing booking's start/end
+      const bStart = new Date(bk.startDate);
+      const [sh, sm] = bk.startTime.split(":").map(Number);
+      bStart.setHours(sh, sm, 0, 0);
+
+      const bEnd = new Date(bk.endDate);
+      const [eh, em] = bk.endTime.split(":").map(Number);
+      bEnd.setHours(eh, em, 0, 0);
+
+      // Inclusive overlap check:
+      //    (bStart <= endRequested) && (bEnd >= startRequested)
+      if (bStart <= endRequested && bEnd >= startRequested) {
+        const idStr = bk.bike.toString();
+        if (!map[idStr]) map[idStr] = [];
+        map[idStr].push({ start: bStart, end: bEnd });
+      }
+      return map;
+    }, {});
+
+    // 7. Determine how many units of this bike type are already overlapping
+    const bikeIdStr = bike._id.toString();
+    const overlappingBookings = bookingsByBike[bikeIdStr] || [];
+    const alreadyBookedCount = overlappingBookings.length;
+    const totalUnits = bike.quantity; // assume "quantity" is total copies/units available
+    console.log(
+      "🚀 ~ createBooking ~ totalUnits = bike.quantity;:",
+      totalUnits,
+      alreadyBookedCount,
+      bookingsByBike
+    );
+
+    if (alreadyBookedCount >= totalUnits) {
+      // No unit free for the requested date+time window
+      throw new ApiError("Bike is not available for the selected period", 400);
+    }
+
+    // 8. Validate pricing options (unlimited vs limitedKm)
+    if (bikeDetails.isUnlimited && !bike.pricePerDay.unlimited.isActive) {
+      throw new ApiError(
+        "Unlimited km option is not available for this bike",
+        400
+      );
+    }
+    if (!bikeDetails.isUnlimited && !bike.pricePerDay.limitedKm.isActive) {
+      throw new ApiError(
+        "Limited km option is not available for this bike",
+        400
+      );
+    }
+
+    // 9. Calculate extra charges for early pickup / late drop‐off
+    let extraAmount = 0;
+    try {
+      const pricing = calculateExtraAmount({
+        bike,
+        startTime,
+        endTime,
+      });
+      extraAmount = pricing || 0;
+    } catch (err) {
+      // If calculateExtraAmount throws (e.g. invalid state), swallow and continue with extraAmount = 0
+      console.warn("calculateExtraAmount error:", err.message);
+      extraAmount = 0;
+    }
+
+    // 10. Decrement availableQuantity and possibly update status
+    bike.availableQuantity = bike.availableQuantity - 1;
+    if (bike.availableQuantity <= 0) {
+      bike.status = "booked";
+    }
+    await bike.save();
+
+    // 11. Build the booking document now that availability is confirmed
+    const booking = await Booking.create({
+      user: req.user._id,
+      bookingType: "bike",
+      bike: bikeId,
+      hotel: undefined,
+      roomType: undefined,
+      startDate,
+      endDate,
+      startTime,
+      endTime,
+      numberOfPeople: undefined,
+      // priceDetails: assume the client already calculated basePrice.
+      // You can also add `extraAmount` here or recompute total on server:
+      priceDetails: {
+        ...priceDetails,
+        extraAmount,
+        totalAmount: (priceDetails.totalAmount || 0) + extraAmount,
+      },
+      bikeDetails,
+      hotelDetails: undefined,
+      couponCode,
+      specialRequests,
+      guestDetails,
+      bookingStatus: "pending",
     });
 
-    if (existingBookings.length > 0) {
-      throw new ApiError("Bike is not available for the selected dates", 400);
-    }
+    // 12. Send confirmation email & SMS
+    const user = await User.findById(req.user._id).select("name email mobile");
+    const emailMessage = `
+      <h1>Bike Booking Confirmation</h1>
+      <p>Dear ${user.name},</p>
+      <p>Your bike booking has been confirmed.</p>
+      <p>Booking ID: ${booking._id}</p>
+      <p>Start: ${new Date(
+        startDate + "T" + startTime + ":00"
+      ).toLocaleString()}</p>
+      <p>End: ${new Date(endDate + "T" + endTime + ":00").toLocaleString()}</p>
+      <p>Extra Charges: ₹${extraAmount.toFixed(2)}</p>
+      <p>Total Amount: ₹${(
+        (priceDetails.totalAmount || 0) + extraAmount
+      ).toFixed(2)}</p>
+      <p>Thank you for choosing HappyGo!</p>
+    `;
+    await sendEmail({
+      email: user.email,
+      subject: "HappyGo Bike Booking Confirmation",
+      message: emailMessage,
+    });
+
+    const smsMessage = `Your HappyGo bike booking is confirmed (ID: ${
+      booking._id
+    }). Total: ₹${((priceDetails.totalAmount || 0) + extraAmount).toFixed(
+      2
+    )}. Thank you!`;
+    // await sendSMS({ phone: user.mobile, message: smsMessage });
+
+    return res.status(201).json({
+      success: true,
+      data: booking,
+    });
   } else if (bookingType === "hotel") {
     if (
       !hotelId ||
@@ -97,7 +247,13 @@ export const createBooking = asyncHandler(async (req, res) => {
       throw new ApiError("Room type not found", 404);
     }
 
-    // Check if room is available
+    // Calculate total rooms needed based on room options
+    const totalRoomsNeeded =
+      (hotelDetails.roomOptions?.bedOnly?.quantity || 0) +
+      (hotelDetails.roomOptions?.bedAndBreakfast?.quantity || 0) +
+      (hotelDetails.roomOptions?.bedBreakfastAndDinner?.quantity || 0);
+
+    // Check if enough rooms are available
     const existingBookings = await Booking.find({
       bookingType: "hotel",
       hotel: hotelId,
@@ -111,8 +267,28 @@ export const createBooking = asyncHandler(async (req, res) => {
       bookingStatus: { $nin: ["cancelled"] },
     });
 
-    if (existingBookings.length >= room.totalRooms) {
-      throw new ApiError("Room is not available for the selected dates", 400);
+    // Calculate total booked rooms
+    let totalBookedRooms = 0;
+    existingBookings.forEach((booking) => {
+      if (booking.hotelDetails && booking.hotelDetails.roomOptions) {
+        totalBookedRooms +=
+          (booking.hotelDetails.roomOptions.bedOnly?.quantity || 0) +
+          (booking.hotelDetails.roomOptions.bedAndBreakfast?.quantity || 0) +
+          (booking.hotelDetails.roomOptions.bedBreakfastAndDinner?.quantity ||
+            0);
+      } else {
+        // For backward compatibility with old bookings
+        totalBookedRooms += 1;
+      }
+    });
+
+    if (totalBookedRooms + totalRoomsNeeded > room.totalRooms) {
+      throw new ApiError(
+        `Only ${
+          room.totalRooms - totalBookedRooms
+        } rooms available for the selected dates`,
+        400
+      );
     }
   }
 
@@ -133,6 +309,7 @@ export const createBooking = asyncHandler(async (req, res) => {
     hotelDetails: bookingType === "hotel" ? hotelDetails : undefined,
     couponCode,
     specialRequests,
+    guestDetails,
     bookingStatus: "pending", // Set initial status
   });
 
@@ -175,7 +352,6 @@ export const createBooking = asyncHandler(async (req, res) => {
 // @route   GET /api/bookings
 // @access  Private
 export const getBookings = asyncHandler(async (req, res) => {
-  console.log("🚀 ~ getBookings ~ req:", req.user);
   const { type, status, limit = 10, page = 1, sort } = req.query;
 
   // Build query
@@ -211,7 +387,6 @@ export const getBookings = asyncHandler(async (req, res) => {
   const skip = (Number.parseInt(page) - 1) * Number.parseInt(limit);
 
   // Execute query
-  console.log("🚀 ~ getBookings ~ query:", query);
   const bookings = await Booking.find(query)
     .populate({
       path: "bike",
@@ -224,7 +399,6 @@ export const getBookings = asyncHandler(async (req, res) => {
     .sort(sortOptions)
     .skip(skip)
     .limit(Number.parseInt(limit));
-  console.log("🚀 ~ getBookings ~ bookings:", bookings);
 
   res.status(200).json({
     success: true,
@@ -311,6 +485,21 @@ export const updateBookingStatus = asyncHandler(async (req, res) => {
   booking.bookingStatus = status;
   if (status === "cancelled") {
     booking.cancellationReason = cancellationReason;
+
+    // If bike booking is cancelled, increase available quantity
+    if (booking.bookingType === "bike" && booking.bike) {
+      const bike = await Bike.findById(booking.bike);
+      if (bike) {
+        bike.availableQuantity += 1;
+
+        // Update status if needed
+        if (bike.status === "booked" && bike.availableQuantity > 0) {
+          bike.status = "available";
+        }
+
+        await bike.save();
+      }
+    }
   }
 
   await booking.save();
@@ -649,3 +838,684 @@ export const getBookingStats = asyncHandler(async (req, res) => {
     },
   });
 });
+
+// @desc    Extend bike booking
+// @route   PUT /api/bookings/:id/extend
+// @access  Private/Employee
+export const extendBikeBooking = asyncHandler(async (req, res) => {
+  const { newEndDate, newEndTime, reason } = req.body;
+
+  if (!newEndDate || !newEndTime) {
+    throw new ApiError("Please provide new end date and time", 400);
+  }
+
+  // Get booking
+  const booking = await Booking.findById(req.params.id);
+
+  if (!booking) {
+    throw new ApiError("Booking not found", 404);
+  }
+
+  // Check if booking is for bike
+  if (booking.bookingType !== "bike") {
+    throw new ApiError("Only bike bookings can be extended", 400);
+  }
+
+  // Check if booking is confirmed
+  if (booking.bookingStatus !== "confirmed") {
+    throw new ApiError("Only confirmed bookings can be extended", 400);
+  }
+
+  if (booking.user.toString() !== req.user._id.toString() && !req?.employee) {
+    throw new ApiError("Not authorized to extend this booking", 401);
+  }
+
+  // Check if new end date is after current end date
+  const currentEndDate = new Date(
+    `${booking.endDate.toISOString().split("T")[0]}T${booking.endTime}`
+  );
+  const proposedEndDate = new Date(`${newEndDate}T${newEndTime}`);
+
+  if (proposedEndDate <= currentEndDate) {
+    throw new ApiError("New end date must be after current end date", 400);
+  }
+
+  // Check if bike is available for the extended period
+  const bike = await Bike.findById(booking.bike);
+
+  if (!bike) {
+    throw new ApiError("Bike not found", 404);
+  }
+
+  // Check for conflicting bookings in the extended period
+  const conflictingBookings = await Booking.find({
+    bookingType: "bike",
+    bike: booking.bike,
+    _id: { $ne: booking._id }, // Exclude current booking
+    startDate: { $lte: proposedEndDate },
+    endDate: { $gte: currentEndDate },
+    bookingStatus: { $nin: ["cancelled"] },
+  });
+
+  if (conflictingBookings.length >= bike.availableQuantity) {
+    console.log(
+      "🚀 ~ extendBikeBooking ~ conflictingBookings:",
+      conflictingBookings.length,
+      bike.availableQuantity
+    );
+    throw new ApiError("Bike is not available for the extended period", 400);
+  }
+
+  // Calculate additional charges
+  const currentDuration = Math.ceil(
+    (currentEndDate - new Date(booking.startDate)) / (1000 * 60 * 60 * 24)
+  );
+  const newDuration = Math.ceil(
+    (proposedEndDate - new Date(booking.startDate)) / (1000 * 60 * 60 * 24)
+  );
+  const additionalDays = newDuration - currentDuration;
+
+  let additionalAmount = 0;
+
+  if (booking.bikeDetails.isUnlimited) {
+    additionalAmount = additionalDays * bike.pricePerDay.unlimited.price;
+  } else {
+    additionalAmount = additionalDays * bike.pricePerDay.limitedKm.price;
+  }
+
+  // Update booking
+  booking.endDate = newEndDate;
+  booking.endTime = newEndTime;
+
+  // Update price details
+  booking.priceDetails.basePrice += additionalAmount;
+  booking.priceDetails.taxes = (booking.priceDetails.basePrice * 0.18).toFixed(
+    2
+  ); // Assuming 18% tax
+  booking.priceDetails.totalAmount = (
+    Number.parseFloat(booking.priceDetails.basePrice) +
+    Number.parseFloat(booking.priceDetails.taxes) -
+    Number.parseFloat(booking.priceDetails.discount || 0)
+  ).toFixed(2);
+
+  // Add extension note
+  booking.extensionHistory = booking.extensionHistory || [];
+  booking.extensionHistory.push({
+    previousEndDate: booking.endDate,
+    previousEndTime: booking.endTime,
+    newEndDate,
+    newEndTime,
+    additionalAmount,
+    reason,
+    extendedBy: req?.employee?._id || req?.user?._id,
+    extendedAt: new Date(),
+  });
+
+  await booking.save();
+
+  // Send notification email to user
+  const user = await User.findById(booking.user);
+
+  if (user) {
+    const emailMessage = `
+      <h1>Booking Extension Confirmation</h1>
+      <p>Dear ${user.name},</p>
+      <p>Your bike booking (ID: ${booking._id}) has been extended.</p>
+      <p>New End Date: ${new Date(
+        newEndDate
+      ).toLocaleDateString()} at ${newEndTime}</p>
+      <p>Additional Amount: ₹${additionalAmount}</p>
+      <p>New Total Amount: ₹${booking.priceDetails.totalAmount}</p>
+      <p>Thank you for choosing HappyGo!</p>
+    `;
+
+    await sendEmail({
+      email: user.email,
+      subject: "HappyGo Booking Extension Confirmation",
+      message: emailMessage,
+    });
+  }
+
+  res.status(200).json({
+    success: true,
+    data: booking,
+  });
+});
+
+// @desc    Complete bike booking
+// @route   PUT /api/bookings/:id/complete
+// @access  Private/Employee
+export const completeBikeBooking = asyncHandler(async (req, res) => {
+  const { finalKmReading, notes } = req.body;
+
+  // Get booking
+  const booking = await Booking.findById(req.params.id);
+
+  if (!booking) {
+    throw new ApiError("Booking not found", 404);
+  }
+
+  // Check if booking is for bike
+  if (booking.bookingType !== "bike") {
+    throw new ApiError("Only bike bookings can be completed", 400);
+  }
+
+  // Check if booking is confirmed
+  if (booking.bookingStatus !== "confirmed") {
+    throw new ApiError("Only confirmed bookings can be completed", 400);
+  }
+
+  // Get bike
+  const bike = await Bike.findById(booking.bike);
+
+  if (!bike) {
+    throw new ApiError("Bike not found", 404);
+  }
+
+  // Check if booking is overdue
+  const currentEndDate = new Date(
+    `${booking.endDate.toISOString().split("T")[0]}T${booking.endTime}`
+  );
+  const now = new Date();
+  const isOverdue = now > currentEndDate;
+
+  // Calculate extra time if overdue
+  let extraHours = 0;
+  let extraDays = 0;
+  let overdueCharges = 0;
+
+  if (isOverdue) {
+    const timeDiff = now - currentEndDate;
+    extraHours = Math.ceil(timeDiff / (1000 * 60 * 60));
+    extraDays = Math.ceil(extraHours / 24);
+
+    // Calculate overdue charges (1.5x the daily rate)
+    if (booking.bikeDetails.isUnlimited) {
+      overdueCharges = (
+        extraDays *
+        bike.pricePerDay.unlimited.price *
+        1.5
+      ).toFixed(2);
+    } else {
+      overdueCharges = (
+        extraDays *
+        bike.pricePerDay.limitedKm.price *
+        1.5
+      ).toFixed(2);
+    }
+  }
+
+  // Calculate additional km charges if applicable
+  let kmCharges = 0;
+  let additionalKm = 0; // Declare additionalKm here
+
+  if (finalKmReading && !booking.bikeDetails.isUnlimited) {
+    const initialKmReading = booking.bikeDetails.initialKmReading || 0;
+    const kmTravelled = finalKmReading - initialKmReading;
+    const kmLimit = booking.bikeDetails.kmLimit;
+
+    additionalKm = Math.max(0, kmTravelled - kmLimit);
+
+    if (additionalKm > 0) {
+      kmCharges = (additionalKm * bike.additionalKmPrice).toFixed(2);
+    }
+
+    booking.bikeDetails.finalKmReading = finalKmReading;
+  }
+
+  // Update booking
+  booking.bookingStatus = "completed";
+  booking.completedAt = now;
+  booking.completedBy = req.employee._id;
+
+  if (notes) {
+    booking.completionNotes = notes;
+  }
+
+  // Add overdue information if applicable
+  if (isOverdue) {
+    booking.overdueInfo = {
+      extraHours,
+      extraDays,
+      overdueCharges,
+      actualReturnDate: now,
+    };
+  }
+
+  // Update additional charges
+  booking.bikeDetails.additionalCharges = {
+    amount: Number.parseFloat(overdueCharges) + Number.parseFloat(kmCharges),
+    reason: `${
+      isOverdue ? `Overdue by ${extraDays} days (₹${overdueCharges})` : ""
+    } ${
+      kmCharges > 0 ? `Additional ${additionalKm} km (₹${kmCharges})` : ""
+    }`.trim(),
+  };
+
+  // Update total amount
+  booking.priceDetails.totalAmount = (
+    Number.parseFloat(booking.priceDetails.totalAmount) +
+    Number.parseFloat(overdueCharges) +
+    Number.parseFloat(kmCharges)
+  ).toFixed(2);
+
+  await booking.save();
+
+  // Update bike availability
+  bike.availableQuantity += 1;
+
+  // Update status if needed
+  if (bike.status === "booked" && bike.availableQuantity > 0) {
+    bike.status = "available";
+  }
+
+  await bike.save();
+
+  // Send completion email to user
+  const user = await User.findById(booking.user);
+
+  if (user) {
+    const emailMessage = `
+      <h1>Booking Completion Confirmation</h1>
+      <p>Dear ${user.name},</p>
+      <p>Your bike booking (ID: ${booking._id}) has been completed.</p>
+      <p>Return Date: ${now.toLocaleDateString()} at ${now.toLocaleTimeString()}</p>
+      ${
+        isOverdue
+          ? `<p>Your booking was overdue by ${extraDays} days. Overdue charges: ₹${overdueCharges}</p>`
+          : ""
+      }
+      ${kmCharges > 0 ? `<p>Additional km charges: ₹${kmCharges}</p>` : ""}
+      <p>Final Total Amount: ₹${booking.priceDetails.totalAmount}</p>
+      <p>Thank you for choosing HappyGo!</p>
+    `;
+
+    await sendEmail({
+      email: user.email,
+      subject: "HappyGo Booking Completion Confirmation",
+      message: emailMessage,
+    });
+  }
+
+  res.status(200).json({
+    success: true,
+    data: booking,
+  });
+});
+
+// @desc    Get employee bookings
+// @route   GET /api/employee/bookings
+// @access  Private/Employee
+export const getEmployeeBookings = asyncHandler(async (req, res) => {
+  const {
+    type,
+    status,
+    startDate,
+    endDate,
+    limit = 10,
+    page = 1,
+    sort,
+  } = req.query;
+
+  // Build query
+  const query = {};
+
+  // Filter by type
+  if (type && type !== "all") {
+    query.bookingType = type.toLowerCase();
+  }
+
+  // Filter by status
+  if (status && status !== "all") {
+    query.bookingStatus = status.toLowerCase();
+  }
+
+  // Filter by date range
+  if (startDate && endDate) {
+    query.$or = [
+      {
+        startDate: { $lte: new Date(endDate) },
+        endDate: { $gte: new Date(startDate) },
+      },
+    ];
+  }
+
+  // Count total documents
+  const total = await Booking.countDocuments(query);
+
+  // Build sort options
+  let sortOptions = {};
+  if (sort) {
+    const sortFields = sort.split(",");
+    sortFields.forEach((field) => {
+      const sortOrder = field.startsWith("-") ? -1 : 1;
+      const fieldName = field.startsWith("-") ? field.substring(1) : field;
+      sortOptions[fieldName] = sortOrder;
+    });
+  } else {
+    sortOptions = { createdAt: -1 };
+  }
+
+  // Pagination
+  const skip = (Number.parseInt(page) - 1) * Number.parseInt(limit);
+
+  // Execute query
+  const bookings = await Booking.find(query)
+    .populate({
+      path: "bike",
+      select: "title brand model images",
+    })
+    .populate({
+      path: "hotel",
+      select: "name location images",
+    })
+    .populate({
+      path: "user",
+      select: "name email mobile",
+    })
+    .sort(sortOptions)
+    .skip(skip)
+    .limit(Number.parseInt(limit));
+
+  // Format bookings for frontend
+  const formattedBookings = bookings.map((booking) => {
+    return {
+      id: booking._id,
+      bookingType:
+        booking.bookingType.charAt(0).toUpperCase() +
+        booking.bookingType.slice(1),
+      status:
+        booking.bookingStatus.charAt(0).toUpperCase() +
+        booking.bookingStatus.slice(1),
+      paymentStatus:
+        booking.paymentStatus.charAt(0).toUpperCase() +
+        booking.paymentStatus.slice(1),
+      startDate: booking.startDate,
+      endDate: booking.endDate,
+      createdAt: booking.createdAt,
+      totalAmount: booking.priceDetails.totalAmount,
+      customerName: booking.user?.name || "Unknown User",
+      itemName:
+        booking.bookingType === "bike"
+          ? booking.bike?.title || "Bike"
+          : booking.hotel?.name || "Hotel",
+    };
+  });
+
+  res.status(200).json({
+    success: true,
+    count: bookings.length,
+    total,
+    page: Number.parseInt(page),
+    pages: Math.ceil(total / Number.parseInt(limit)),
+    data: formattedBookings,
+  });
+});
+
+// @desc    Get employee booking by ID
+// @route   GET /api/employee/bookings/:id
+// @access  Private/Employee
+export const getEmployeeBooking = asyncHandler(async (req, res) => {
+  const booking = await Booking.findById(req.params.id)
+    .populate({
+      path: "bike",
+      select:
+        "title brand model images pricePerDay additionalKmPrice registrationNumber",
+    })
+    .populate({
+      path: "hotel",
+      select: "name location images rooms",
+    })
+    .populate({
+      path: "user",
+      select: "name email mobile",
+    })
+    .populate({
+      path: "assignedEmployee",
+      select: "name email mobile",
+    });
+
+  if (!booking) {
+    throw new ApiError("Booking not found", 404);
+  }
+
+  res.status(200).json({
+    success: true,
+    data: booking,
+  });
+});
+
+// @desc    Update booking status by employee
+// @route   PUT /api/employee/bookings/:id/status
+// @access  Private/Employee
+export const updateEmployeeBookingStatus = asyncHandler(async (req, res) => {
+  const { status, cancellationReason } = req.body;
+
+  // Validate status
+  if (!status || !["confirmed", "cancelled", "completed"].includes(status)) {
+    throw new ApiError("Invalid status", 400);
+  }
+
+  // Get booking
+  const booking = await Booking.findById(req.params.id);
+
+  if (!booking) {
+    throw new ApiError("Booking not found", 404);
+  }
+
+  // Update booking
+  booking.bookingStatus = status;
+  booking.assignedEmployee = req.employee._id;
+
+  if (status === "cancelled") {
+    // If cancellation reason is provided, add it to the booking
+    if (cancellationReason) {
+      booking.cancellationReason = cancellationReason;
+    }
+
+    // If bike booking is cancelled, increase available quantity
+    if (booking.bookingType === "bike" && booking.bike) {
+      const bike = await Bike.findById(booking.bike);
+      if (bike) {
+        bike.availableQuantity += 1;
+
+        // Update status if needed
+        if (bike.status === "booked" && bike.availableQuantity > 0) {
+          bike.status = "available";
+        }
+
+        await bike.save();
+      }
+    }
+  }
+
+  await booking.save();
+
+  res.status(200).json({
+    success: true,
+    data: booking,
+  });
+});
+
+// Add this new controller method for extending bookings
+// Updated extendBooking controller with time support
+export const extendBooking = asyncHandler(async (req, res) => {
+  const { bookingId } = req.params;
+  const { newEndDate, newEndTime } = req.body;
+
+  if (!bookingId || !newEndDate) {
+    throw new ApiError(400, "Booking ID and new end date are required");
+  }
+
+  if (!newEndTime) {
+    throw new ApiError(400, "New end time is required");
+  }
+
+  const booking = await Booking.findById(bookingId);
+  if (!booking) {
+    throw new ApiError(404, "Booking not found");
+  }
+
+  // Create date objects with time for comparison
+  const currentEndDateTime = new Date(booking.endDate);
+  if (booking.endTime) {
+    const [hours, minutes] = booking.endTime.split(":").map(Number);
+    currentEndDateTime.setHours(hours, minutes, 0);
+  }
+
+  // Parse the new end date and time
+  const extendedEndDate = new Date(newEndDate);
+  const [hours, minutes] = newEndTime.split(":").map(Number);
+  extendedEndDate.setHours(hours, minutes, 0);
+
+  if (extendedEndDate <= currentEndDateTime) {
+    throw new ApiError(
+      400,
+      "New end date and time must be after current end date and time"
+    );
+  }
+
+  // Check if the bike is already booked for the extended period
+  console.log("🚀 ~ extendBooking ~ booking:", booking.bike, booking);
+  const bike = await Bike.findById(booking.bike);
+  console.log("🚀 ~ extendBooking ~ bike:", bike);
+  if (!bike) {
+    throw new ApiError(404, "Bike not found");
+  }
+
+  // Find any overlapping bookings
+  const overlappingBookings = await Booking.find({
+    bikeId: booking.bikeId,
+    _id: { $ne: booking._id }, // Exclude current booking
+    status: { $nin: ["cancelled", "rejected"] },
+    startDate: { $lt: extendedEndDate },
+    endDate: { $gt: currentEndDateTime },
+  });
+
+  if (overlappingBookings.length > 0) {
+    throw new ApiError(
+      400,
+      "Cannot extend booking as bike is already booked for the requested period"
+    );
+  }
+
+  // Calculate additional amount with more precision (including partial days)
+  const startDateTime = new Date(booking.startDate);
+  if (booking.startTime) {
+    const [startHours, startMinutes] = booking.startTime.split(":").map(Number);
+    startDateTime.setHours(startHours, startMinutes, 0);
+  }
+
+  // Calculate duration in milliseconds and convert to days (including partial days)
+  const originalDurationMs = currentEndDateTime - startDateTime;
+  const newDurationMs = extendedEndDate - startDateTime;
+
+  // Convert to days (including fractional days)
+  const originalDuration = originalDurationMs / (1000 * 60 * 60 * 24);
+  const newDuration = newDurationMs / (1000 * 60 * 60 * 24);
+  const additionalDays = newDuration - originalDuration;
+
+  // Calculate daily rate from original booking
+  const dailyRate = booking.totalAmount / originalDuration;
+  const additionalAmount = dailyRate * additionalDays;
+  const newTotalAmount = booking.totalAmount + additionalAmount;
+
+  // Update booking
+  booking.endDate = newEndDate; // Store as date string
+  booking.endTime = newEndTime; // Store time separately
+  booking.totalAmount = newTotalAmount;
+  booking.updatedAt = Date.now();
+
+  // Add extension information to booking history
+  if (!booking.history) {
+    booking.history = [];
+  }
+
+  console.log("🚀 ~ extendBooking ~ req.user:", req.employee);
+  booking.history.push({
+    action: "extended",
+    timestamp: Date.now(),
+    details: `Booking extended to ${newEndDate} ${newEndTime}. Additional amount: ₹${additionalAmount.toFixed(
+      2
+    )}`,
+    performedBy: req.employee._id,
+  });
+
+  await booking.save();
+
+  return res.status(200).json({
+    success: true,
+    message: "Booking extended successfully",
+    booking,
+    additionalAmount,
+    newTotalAmount,
+  });
+});
+
+// Modify the cancelBooking function to allow cancellation of confirmed bookings
+export const cancelBooking = asyncHandler(async (req, res) => {
+  const { bookingId } = req.params;
+  const { cancellationReason } = req.body;
+
+  if (!bookingId) {
+    throw new ApiError(400, "Booking ID is required");
+  }
+
+  const booking = await Booking.findById(bookingId);
+  if (!booking) {
+    throw new ApiError(404, "Booking not found");
+  }
+
+  // Allow cancellation regardless of status for employees and admins
+  // For regular users, we might want to keep restrictions
+  if (req.user.role === "user" && booking.status !== "pending") {
+    throw new ApiError(400, "Cannot cancel booking as it is already processed");
+  }
+
+  booking.status = "cancelled";
+  booking.cancellationReason = cancellationReason || "Cancelled by employee";
+  booking.updatedAt = Date.now();
+
+  // Add cancellation to booking history
+  if (!booking.history) {
+    booking.history = [];
+  }
+
+  booking.history.push({
+    action: "cancelled",
+    timestamp: Date.now(),
+    details: `Booking cancelled. Reason: ${
+      cancellationReason || "Not provided"
+    }`,
+    performedBy: req.user._id,
+  });
+
+  await booking.save();
+
+  return res.status(200).json({
+    success: true,
+    message: "Booking cancelled successfully",
+    booking,
+  });
+});
+
+// Export the new controller methods
+// module.exports = {
+//   createBooking,
+//   getBookings,
+//   getBooking,
+//   updateBookingStatus,
+//   uploadDocuments,
+//   calculateAdditionalCharges,
+//   getHotelBookings,
+//   getBikeBookings,
+//   updateHotelBookingDetails,
+//   getBookingStats,
+//   extendBikeBooking,
+//   completeBikeBooking,
+//   getEmployeeBookings,
+//   getEmployeeBooking,
+//   updateEmployeeBookingStatus,
+//   extendBooking,
+//   cancelBooking,
+// };

@@ -5,50 +5,183 @@ import { ApiError } from "../utils/ApiError.js";
 import { generateToken } from "../utils/generateToken.js";
 import { sendEmail } from "../utils/sendEmail.js";
 import crypto from "crypto";
+import Referral from "../models/referral.model.js";
 
 // @desc    Register a new user
 // @route   POST /api/auth/register
 // @access  Public
+// @desc    Register a new user and send OTP
+// @route   POST /api/auth/register
+// @access  Public
 export const registerUser = asyncHandler(async (req, res) => {
-  const { name, email, mobile } = req.body;
+  const { name, email, mobile, referralCode } = req.body;
+  console.log(
+    "🚀 ~ registerUser ~ name, email, mobile, referralCode:",
+    name,
+    email,
+    mobile,
+    referralCode
+  );
+
+  // Validation
+  if (!name || !email || !mobile) {
+    throw new ApiError("Please provide all required fields", 400);
+  }
+
+  if (!/^[0-9]{10}$/.test(mobile)) {
+    throw new ApiError("Please provide a valid 10-digit mobile number", 400);
+  }
+
+  if (!/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(email)) {
+    throw new ApiError("Please provide a valid email address", 400);
+  }
 
   // Check if user already exists
   const userExists = await User.findOne({ $or: [{ email }, { mobile }] });
+  console.log("🚀 ~ registerUser ~ userExists:", userExists);
 
   if (userExists) {
-    throw new ApiError("User already exists", 400);
+    throw new ApiError("User with this email or mobile already exists", 400);
+  }
+
+  let referrer = null;
+  let referralRecord = null;
+
+  // Validate referral code if provided
+  if (referralCode && referralCode.trim()) {
+    referrer = await User.findOne({
+      referralCode: referralCode.trim().toUpperCase(),
+    });
+    if (!referrer) {
+      throw new ApiError("Invalid referral code", 400);
+    }
   }
 
   // Create user
   const user = await User.create({
-    name,
-    email,
-    mobile,
+    name: name.trim(),
+    email: email.toLowerCase().trim(),
+    mobile: mobile.trim(),
+    referredBy: referrer ? referrer._id : null,
   });
+
+  // Create referral record if referral code was used
+  if (referrer) {
+    referralRecord = await Referral.create({
+      referrer: referrer._id,
+      referred: user._id,
+      referralCode: referralCode.trim().toUpperCase(),
+      status: "pending",
+      reward: 500, // ₹500 reward
+      expiryDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
+    });
+  }
 
   // Generate email verification token
   const emailVerificationToken = user.generateEmailVerificationToken();
+
+  // Generate mobile OTP immediately
+  const mobileOTP = user.generateMobileVerificationOTP();
   await user.save();
 
   // Create verification URL
   const verificationURL = `${process.env.FRONTEND_URL}/verify-email/${emailVerificationToken}`;
 
-  // Send email
+  // Enhanced email message
   const message = `
-    <h1>Email Verification</h1>
-    <p>Please click on the link below to verify your email:</p>
-    <a href="${verificationURL}" target="_blank">Verify Email</a>
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; padding: 30px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+      <div style="text-align: center; margin-bottom: 30px;">
+        <div style="width: 60px; height: 60px; background-color: #F47B20; border-radius: 12px; display: inline-flex; align-items: center; justify-content: center; margin-bottom: 15px;">
+          <span style="color: white; font-weight: bold; font-size: 24px;">HG</span>
+        </div>
+        <h1 style="color: #F47B20; margin: 0; font-size: 28px;">Welcome to Happy Go!</h1>
+        <p style="color: #666666; margin: 10px 0 0 0;">Anywhere Everytime</p>
+      </div>
+
+      <div style="background-color: #f8f9fa; border-radius: 8px; padding: 20px; margin: 20px 0;">
+        <h2 style="color: #333333; margin: 0 0 15px 0; font-size: 20px;">Hi ${
+          user.name
+        }! 👋</h2>
+        <p style="color: #666666; margin: 0 0 20px 0; line-height: 1.5;">
+          Your account has been created successfully! We've sent an OTP to your mobile number for verification.
+        </p>
+        
+        <div style="background-color: #E3F2FD; border-radius: 6px; padding: 15px; margin: 15px 0; text-align: center;">
+          <p style="color: #1976D2; margin: 0 0 10px 0; font-weight: bold;">Your Mobile Verification OTP:</p>
+          <div style="background-color: white; border: 2px solid #1976D2; border-radius: 6px; padding: 10px; display: inline-block;">
+            <span style="font-family: monospace; font-size: 24px; font-weight: bold; letter-spacing: 4px; color: #1976D2;">${mobileOTP}</span>
+          </div>
+          <p style="color: #1565C0; margin: 10px 0 0 0; font-size: 12px;">This OTP expires in 10 minutes</p>
+        </div>
+
+        <div style="text-align: center; margin: 25px 0;">
+          <a href="${verificationURL}" 
+             style="background-color: #F47B20; color: white; padding: 12px 30px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold;">
+            Verify Email Address
+          </a>
+        </div>
+      </div>
+
+      ${
+        referralRecord
+          ? `
+        <div style="background-color: #FFF3E0; border: 2px solid #FFB74D; border-radius: 8px; padding: 20px; margin: 20px 0;">
+          <div style="text-align: center;">
+            <h3 style="color: #F47B20; margin: 0 0 10px 0; font-size: 18px;">🎉 Referral Applied Successfully!</h3>
+            <p style="color: #E65100; margin: 0 0 10px 0; font-weight: bold;">
+              You've been referred by ${referrer.name}
+            </p>
+            <div style="background-color: #FFCC02; color: #333; padding: 10px; border-radius: 6px; font-weight: bold;">
+              Earn ₹500 when you complete your first booking!
+            </div>
+          </div>
+        </div>
+      `
+          : ""
+      }
+
+      <div style="background-color: #E3F2FD; border-radius: 8px; padding: 20px; margin: 20px 0;">
+        <h3 style="color: #1976D2; margin: 0 0 10px 0; font-size: 16px;">Your Referral Code</h3>
+        <div style="background-color: white; border: 2px dashed #1976D2; border-radius: 6px; padding: 15px; text-align: center;">
+          <code style="font-size: 20px; font-weight: bold; color: #1976D2; letter-spacing: 2px;">
+            ${user.referralCode}
+          </code>
+        </div>
+        <p style="color: #1565C0; margin: 10px 0 0 0; font-size: 14px; text-align: center;">
+          Share this code with friends and earn ₹100 for each successful referral!
+        </p>
+      </div>
+
+      <div style="border-top: 1px solid #eeeeee; padding-top: 20px; margin-top: 30px; text-align: center;">
+        <p style="color: #999999; font-size: 12px; margin: 0;">
+          If you didn't create this account, please ignore this email.
+        </p>
+        <p style="color: #999999; font-size: 12px; margin: 5px 0 0 0;">
+          Need help? Contact us at support@happygo.com or call +91 90080-22800
+        </p>
+      </div>
+    </div>
   `;
 
+  // Send email
   await sendEmail({
     email: user.email,
-    subject: "Email Verification",
+    subject: "Welcome to Happy Go - Verify Your Account",
     message,
   });
 
+  console.log("🚀 ~ registerUser ~ mobileOTP:", mobileOTP);
+
+  // Optional: Send SMS OTP (uncomment when SMS service is ready)
+  // await sendSMS({
+  //   phone: mobile,
+  //   message: `Welcome to Happy Go! Your verification OTP is: ${mobileOTP}. Valid for 10 minutes.`,
+  // });
+
   res.status(201).json({
     success: true,
-    message: "User registered successfully. Please verify your email.",
+    message:
+      "Registration successful! Please verify the OTP sent to your mobile number.",
     data: {
       _id: user._id,
       name: user.name,
@@ -56,9 +189,17 @@ export const registerUser = asyncHandler(async (req, res) => {
       mobile: user.mobile,
       isEmailVerified: user.isEmailVerified,
       isMobileVerified: user.isMobileVerified,
+      referralCode: user.referralCode,
+      referredBy: user.referredBy,
+      referralApplied: !!referralRecord,
+      referralReward: referralRecord ? referralRecord.reward : 0,
+      referrerName: referrer ? referrer.name : null,
+      otpSent: true, // Indicate OTP was sent
     },
   });
 });
+
+// Keep your existing verifyMobileOTP method as is - it already issues JWT tokens
 
 // @desc    Verify email
 // @route   GET /api/auth/verify-email/:token
@@ -181,7 +322,9 @@ export const verifyMobileOTP = asyncHandler(async (req, res) => {
     mobile,
     mobileVerificationOTP: otp,
     mobileVerificationExpire: { $gt: Date.now() },
-  });
+  }).populate("referredBy", "name referralCode");
+
+  console.log("🚀 ~ verifyMobileOTP ~ user:", otp, mobile, user);
 
   // If found in User model
   if (user) {
@@ -190,6 +333,24 @@ export const verifyMobileOTP = asyncHandler(async (req, res) => {
     user.mobileVerificationOTP = undefined;
     user.mobileVerificationExpire = undefined;
     await user.save();
+
+    // Get referral info if user was referred
+    let referralInfo = null;
+    if (user.referredBy) {
+      const referral = await Referral.findOne({
+        referred: user._id,
+        referrer: user.referredBy._id,
+      });
+
+      if (referral) {
+        referralInfo = {
+          referrerName: user.referredBy.name,
+          referralCode: referral.referralCode,
+          reward: referral.reward,
+          status: referral.status,
+        };
+      }
+    }
 
     // Generate token
     const token = generateToken(user._id);
@@ -209,25 +370,23 @@ export const verifyMobileOTP = asyncHandler(async (req, res) => {
         walletBalance: user.walletBalance,
         referralCode: user.referralCode,
         role: user.role,
+        referralInfo: referralInfo,
       },
     });
   }
 
-  // If not found in User model, check in Employee model
+  // Keep existing employee logic as is...
   const employee = await Employee.findOne({
     mobile,
     mobileVerificationOTP: otp,
     mobileVerificationExpire: { $gt: Date.now() },
   });
 
-  // If found in Employee model
   if (employee) {
-    // Clear OTP
     employee.mobileVerificationOTP = undefined;
     employee.mobileVerificationExpire = undefined;
     await employee.save();
 
-    // Generate token
     const token = generateToken(employee._id);
 
     return res.status(200).json({
@@ -246,7 +405,6 @@ export const verifyMobileOTP = asyncHandler(async (req, res) => {
     });
   }
 
-  // If not found in either model
   throw new ApiError("Invalid or expired OTP", 400);
 });
 

@@ -96,7 +96,7 @@ const bookingSchema = new mongoose.Schema(
     },
     bikeDetails: {
       kmLimit: {
-        type: Number,
+        type: mongoose.Schema.Types.Mixed,
         required: function () {
           return this.bookingType === "bike";
         },
@@ -141,11 +141,37 @@ const bookingSchema = new mongoose.Schema(
       },
     },
     hotelDetails: {
-      roomOption: {
-        type: String,
-        enum: ["bedOnly", "bedAndBreakfast", "bedBreakfastAndDinner"],
-        required: function () {
-          return this.bookingType === "hotel";
+      // Modified to store quantities for each meal option
+      roomOptions: {
+        bedOnly: {
+          quantity: {
+            type: Number,
+            default: 0,
+          },
+          pricePerUnit: {
+            type: Number,
+            default: 0,
+          },
+        },
+        bedAndBreakfast: {
+          quantity: {
+            type: Number,
+            default: 0,
+          },
+          pricePerUnit: {
+            type: Number,
+            default: 0,
+          },
+        },
+        bedBreakfastAndDinner: {
+          quantity: {
+            type: Number,
+            default: 0,
+          },
+          pricePerUnit: {
+            type: Number,
+            default: 0,
+          },
         },
       },
       checkInTime: {
@@ -168,11 +194,88 @@ const bookingSchema = new mongoose.Schema(
       type: String,
       enum: ["pending", "processed", "rejected"],
     },
+    guestDetails: {
+      name: {
+        type: String,
+      },
+      email: {
+        type: String,
+      },
+      mobile: {
+        type: String,
+      },
+    },
+    completedAt: {
+      type: Date,
+    },
+    completedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Employee",
+    },
+    completionNotes: {
+      type: String,
+    },
+    overdueInfo: {
+      extraHours: {
+        type: Number,
+      },
+      extraDays: {
+        type: Number,
+      },
+      overdueCharges: {
+        type: Number,
+      },
+      actualReturnDate: {
+        type: Date,
+      },
+    },
+    extensionHistory: [
+      {
+        previousEndDate: {
+          type: Date,
+          required: true,
+        },
+        previousEndTime: {
+          type: String,
+          required: true,
+        },
+        newEndDate: {
+          type: Date,
+          required: true,
+        },
+        newEndTime: {
+          type: String,
+          required: true,
+        },
+        additionalAmount: {
+          type: Number,
+          required: true,
+        },
+        reason: {
+          type: String,
+        },
+        extendedBy: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "Employee",
+        },
+        extendedAt: {
+          type: Date,
+          default: Date.now,
+        },
+      },
+    ],
   },
   {
     timestamps: true,
   }
 );
+
+bookingSchema.index({
+  bookingType: 1,
+  bookingStatus: 1,
+  start: 1,
+  end: 1,
+});
 
 const Booking = mongoose.model("Booking", bookingSchema);
 

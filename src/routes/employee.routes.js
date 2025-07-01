@@ -22,6 +22,17 @@ import {
   getEmployeeBookings,
   getEmployeeBookingById,
 } from "../controllers/employee.controller.js";
+
+import {
+  getHotels,
+  getHotelById,
+  updateHotel,
+  getAllBookings,
+  extendBooking,
+  checkoutBooking,
+  cancelBooking,
+} from "../controllers/hotelEmployee.controller.js";
+
 import {
   employeeProtect,
   authorizeEmployee,
@@ -117,5 +128,27 @@ router.post(
 );
 router.get("/documents", employeeProtect, getDocuments);
 router.delete("/documents/:id", employeeProtect, deleteDocument);
+
+/**
+ * HOTEL ROUTES (employee access only)
+ */
+router.get("/hotels", employeeProtect, getHotels);
+router.get("/hotels/:id", employeeProtect, getHotelById);
+router.put("/hotels/:id", employeeProtect, updateHotel);
+
+/**
+ * BOOKING ROUTES (hotel‐type bookings only)
+ */
+// 1) Get all hotel bookings (or filter by ?hotel=<hotelId>)
+router.get("/bookings", employeeProtect, getAllBookings);
+
+// 2) Extend a booking
+router.put("/bookings/:id/extend", employeeProtect, extendBooking);
+
+// 3) Checkout a booking
+router.put("/bookings/:id/checkout", employeeProtect, checkoutBooking);
+
+// 4) (Optional) Cancel a booking
+router.put("/bookings/:id/cancel", employeeProtect, cancelBooking);
 
 export default router;

@@ -1,6 +1,11 @@
 import mongoose from "mongoose";
 import crypto from "crypto";
 
+// Encryption key (store securely in environment variables)
+const ENCRYPTION_KEY =
+  process.env.AADHAAR_ENCRYPTION_KEY || crypto.randomBytes(32).toString("hex");
+const IV_LENGTH = 16; // For AES
+
 const userSchema = new mongoose.Schema(
   {
     name: {
@@ -55,6 +60,43 @@ const userSchema = new mongoose.Schema(
     mobileVerificationExpire: Date,
     resetPasswordToken: String,
     resetPasswordExpire: Date,
+    aadhaar: {
+      maskedNumber: {
+        type: String,
+        match: [
+          /^XXXX-XXXX-\d{4}$/,
+          "Please provide a valid masked Aadhaar number (XXXX-XXXX-1234)",
+        ],
+      },
+      encryptedNumber: {
+        type: String,
+        select: false,
+      },
+      name: String,
+      dob: String,
+      gender: String,
+      careOf: String,
+      address: {
+        full: String,
+        split: {
+          country: String,
+          dist: String,
+          house: String,
+          landmark: String,
+          pincode: Number,
+          po: String,
+          state: String,
+          street: String,
+          subdist: String,
+          vtc: String,
+          locality: String,
+        },
+      },
+      yearOfBirth: Number,
+      photoKey: String,
+      shareCode: String,
+    },
+    dlImageKey: String,
   },
   {
     timestamps: true,
@@ -83,50 +125,68 @@ userSchema.pre("save", async function (next) {
   next();
 });
 
+// Encrypt Aadhaar number before saving
+userSchema.pre("save", async function (next) {
+  if (
+    this.isModified("aadhaar.encryptedNumber") &&
+    this.aadhaar.encryptedNumber
+  ) {
+    const iv = crypto.randomBytes(IV_LENGTH);
+    const cipher = crypto.createCipheriv(
+      "aes-256-cbc",
+      Buffer.from(ENCRYPTION_KEY, "hex"),
+      iv
+    );
+    let encrypted = cipher.update(this.aadhaar.encryptedNumber);
+    encrypted = Buffer.concat([encrypted, cipher.final()]);
+    this.aadhaar.encryptedNumber =
+      iv.toString("hex") + ":" + encrypted.toString("hex");
+  }
+  next();
+});
+
 // Generate email verification token
 userSchema.methods.generateEmailVerificationToken = function () {
-  // Generate token
   const verificationToken = crypto.randomBytes(20).toString("hex");
-
-  // Hash token and set to emailVerificationToken field
   this.emailVerificationToken = crypto
     .createHash("sha256")
     .update(verificationToken)
     .digest("hex");
-
-  // Set expire
   this.emailVerificationExpire = Date.now() + 10 * 60 * 1000; // 10 minutes
-
   return verificationToken;
 };
 
 // Generate mobile verification OTP
 userSchema.methods.generateMobileVerificationOTP = function () {
-  // Generate OTP
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
-
-  // Set OTP and expire
   this.mobileVerificationOTP = otp;
   this.mobileVerificationExpire = Date.now() + 10 * 60 * 1000; // 10 minutes
-
   return otp;
 };
 
 // Generate password reset token
 userSchema.methods.getResetPasswordToken = function () {
-  // Generate token
   const resetToken = crypto.randomBytes(20).toString("hex");
-
-  // Hash token and set to resetPasswordToken field
   this.resetPasswordToken = crypto
     .createHash("sha256")
     .update(resetToken)
     .digest("hex");
-
-  // Set expire
   this.resetPasswordExpire = Date.now() + 10 * 60 * 1000; // 10 minutes
-
   return resetToken;
+};
+
+// Method to decrypt Aadhaar number (for authorized access)
+userSchema.methods.getDecryptedAadhaar = function () {
+  if (!this.aadhaar.encryptedNumber) return null;
+  const [iv, encryptedText] = this.aadhaar.encryptedNumber.split(":");
+  const decipher = crypto.createDecipheriv(
+    "aes-256-cbc",
+    Buffer.from(ENCRYPTION_KEY, "hex"),
+    Buffer.from(iv, "hex")
+  );
+  let decrypted = decipher.update(Buffer.from(encryptedText, "hex"));
+  decrypted = Buffer.concat([decrypted, decipher.final()]);
+  return decrypted.toString();
 };
 
 const User = mongoose.model("User", userSchema);
