@@ -1,107 +1,12 @@
-export function calculatePriceForBike({
-  bike,
-  startDate,
-  endDate,
-  startTime,
-  endTime,
-  isUnlimited,
-  TAX_RATE = 0,
-  discount = 0,
-}) {
-  // 1. Convert startDate/endDate → midnight‐normalized Date objects
-  const sDate = new Date(startDate);
-  sDate.setHours(0, 0, 0, 0);
-  const eDate = new Date(endDate);
-  eDate.setHours(0, 0, 0, 0);
-
-  // 2. Compute rentalDays = calendar days (minimum 1)
-  const msPerDay = 1000 * 60 * 60 * 24;
-  let rentalDays = Math.ceil((eDate.getTime() - sDate.getTime()) / msPerDay);
-  if (rentalDays <= 0) rentalDays = 1;
-
-  // 3. Pick perDayRate (limitedKm vs unlimited)
-  let perDayRate;
-  if (isUnlimited) {
-    if (!bike.pricePerDay.unlimited.isActive) {
-      throw new Error("Unlimited‐km mode not active for this bike");
-    }
-    perDayRate = bike.pricePerDay.unlimited.price;
-  } else {
-    if (!bike.pricePerDay.limitedKm.isActive) {
-      throw new Error("Limited‐km mode not active for this bike");
-    }
-    perDayRate = bike.pricePerDay.limitedKm.price;
-  }
-
-  // 4. basePrice = rentalDays × perDayRate
-  const basePrice = rentalDays * perDayRate;
-
-  // 5. Parse the hours from "HH:mm"
-  const [sh] = startTime.split(":").map((n) => parseInt(n, 10));
-  const [eh] = endTime.split(":").map((n) => parseInt(n, 10));
-
-  // 6. earlyPickupFee: if startHour < 7, charge ₹100/hr
-  const NORMAL_PICKUP_HOUR = 7;
-  let earlyPickupFee = 0;
-  if (sh < NORMAL_PICKUP_HOUR) {
-    const hrsEarly = NORMAL_PICKUP_HOUR - sh;
-    earlyPickupFee = hrsEarly * 100;
-  }
-
-  // 7. lateDropFee: if endHour > 18, charge ₹100/hr
-  const NORMAL_DROPOFF_HOUR = 18;
-  let lateDropFee = 0;
-  if (eh > NORMAL_DROPOFF_HOUR) {
-    const hrsLate = eh - NORMAL_DROPOFF_HOUR;
-    lateDropFee = hrsLate * 100;
-  }
-
-  // 8. Subtotal before tax/discount
-  const subTotal = basePrice + earlyPickupFee + lateDropFee;
-
-  // 9. Compute taxes if any
-  const taxes = Math.round(subTotal * TAX_RATE);
-
-  // 10. Compute final total
-  const totalAmount = subTotal + taxes - discount;
-
-  // 11. extraAmount = sum of early+late fees
-  const extraAmount = earlyPickupFee + lateDropFee;
-
-  return {
-    basePrice,
-    earlyPickupFee,
-    lateDropFee,
-    taxes,
-    discount,
-    totalAmount,
-    extraAmount,
-  };
-}
-
 export function calculateExtraAmount({
   bike,
   startTime,
   endTime,
   isUnlimited,
 }) {
-  // 1. Check that the chosen mode is active. We don’t need per-day rate here,
-  //    but we enforce the same “mode must be active” rule.
-  // if (isUnlimited) {
-  //   if (!bike.pricePerDay.unlimited.isActive) {
-  //     throw new Error("Unlimited-km mode not active for this bike");
-  //   }
-  // } else {
-  //   if (!bike.pricePerDay.limitedKm.isActive) {
-  //     throw new Error("Limited-km mode not active for this bike");
-  //   }
-  // }
-
-  // 2. Parse the “HH:mm” strings into integer hours
   const [sh] = startTime.split(":").map((n) => parseInt(n, 10));
   const [eh] = endTime.split(":").map((n) => parseInt(n, 10));
 
-  // 3. Compute earlyPickupFee: if startHour < 7, charge ₹100/hr
   const NORMAL_PICKUP_HOUR = 7;
   let earlyPickupFee = 0;
   if (sh < NORMAL_PICKUP_HOUR) {
@@ -109,7 +14,6 @@ export function calculateExtraAmount({
     earlyPickupFee = hrsEarly * 100;
   }
 
-  // 4. Compute lateDropFee: if endHour > 18, charge ₹100/hr
   const NORMAL_DROPOFF_HOUR = 18;
   let lateDropFee = 0;
   if (eh > NORMAL_DROPOFF_HOUR) {
@@ -117,6 +21,140 @@ export function calculateExtraAmount({
     lateDropFee = hrsLate * 100;
   }
 
-  // 5. Sum and return
   return earlyPickupFee + lateDropFee;
+}
+
+export function calculateRentalPricing({
+  bike,
+  startDate,
+  startTime,
+  endDate,
+  endTime,
+  kmOption = "limited",
+}) {
+  const start = new Date(`${startDate}T${startTime}`);
+  const end = new Date(`${endDate}T${endTime}`);
+
+  const isWeekendBooking = hasWeekendInRange(start, end);
+  const totalHours = (end - start) / (1000 * 60 * 60);
+  const totalDays = Math.ceil(totalHours / 24);
+
+  let basePrice = 0;
+  let breakdown = {
+    type: "",
+    duration: "",
+    basePrice: 0,
+    extraCharges: 0,
+    subtotal: 0,
+    gst: 0,
+    total: 0,
+  };
+
+  if (isWeekendBooking) {
+    basePrice = bike.pricePerDay.unlimited.price * totalDays;
+    breakdown.type = "weekend";
+    breakdown.duration = `${totalDays} day(s)`;
+    kmOption = "unlimited";
+
+    if (!bike.pricePerDay.unlimited.isActive) {
+      throw new Error("Weekend bookings require unlimited km option");
+    }
+  } else {
+    if (totalHours <= 5) {
+      const fullPrice =
+        kmOption === "unlimited"
+          ? bike.pricePerDay.unlimited.price
+          : bike.pricePerDay.limitedKm.price;
+
+      basePrice = fullPrice * 0.5;
+      breakdown.type = "weekday_short";
+      breakdown.duration = `${totalHours.toFixed(1)} hours`;
+    } else {
+      basePrice =
+        kmOption === "unlimited"
+          ? bike.pricePerDay.unlimited.price * totalDays
+          : bike.pricePerDay.limitedKm.price * totalDays;
+
+      breakdown.type = "weekday_full";
+      breakdown.duration = `${totalDays} day(s)`;
+    }
+
+    const selectedOption =
+      kmOption === "unlimited"
+        ? bike.pricePerDay.unlimited
+        : bike.pricePerDay.limitedKm;
+
+    if (!selectedOption.isActive) {
+      throw new Error(`${kmOption} km option not available`);
+    }
+  }
+
+  const extraCharges = calculateTimeBasedCharges(startTime, endTime);
+  const subtotal = basePrice + extraCharges;
+  const gst = subtotal * 0.05; // 5% GST
+  const total = subtotal + gst;
+
+  breakdown.basePrice = basePrice;
+  breakdown.extraCharges = extraCharges;
+  breakdown.subtotal = subtotal;
+  breakdown.gst = Math.round(gst * 100) / 100; // Round to 2 decimal places
+  breakdown.total = Math.round(total * 100) / 100; // Round to 2 decimal places
+
+  return {
+    totalPrice: breakdown.total,
+    breakdown,
+    kmOption,
+    isWeekendBooking,
+  };
+}
+
+function hasWeekendInRange(start, end) {
+  const startDate = new Date(start);
+  const endDate = new Date(end);
+  const current = new Date(startDate);
+
+  while (current <= endDate) {
+    const dayOfWeek = current.getDay();
+
+    if (
+      dayOfWeek === 5 ||
+      dayOfWeek === 6 ||
+      dayOfWeek === 0 ||
+      dayOfWeek === 1
+    ) {
+      return true;
+    }
+
+    current.setDate(current.getDate() + 1);
+  }
+
+  return false;
+}
+
+function calculateTimeBasedCharges(startTime, endTime) {
+  const [startHour, startMin] = startTime.split(":").map(Number);
+  const [endHour, endMin] = endTime.split(":").map(Number);
+
+  const startDecimal = startHour + startMin / 60;
+  const endDecimal = endHour + endMin / 60;
+
+  let extraCharges = 0;
+
+  if (startDecimal >= 5 && startDecimal <= 6.5) {
+    extraCharges += 100;
+  }
+
+  if (endDecimal > 20.5) {
+    if (endDecimal <= 22) {
+      const lateHours = endDecimal - 20.5;
+      const slots = Math.ceil(lateHours * 2);
+      extraCharges += slots * 50;
+    } else if (endDecimal <= 22.5) {
+      extraCharges += 300;
+    } else {
+      throw new Error("Drop-off after 10:30 PM not allowed");
+    }
+  }
+
+  return extraCharges;
 }

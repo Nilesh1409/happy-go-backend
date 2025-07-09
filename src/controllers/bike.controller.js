@@ -4,7 +4,10 @@ import BikeMaintenance from "../models/bikeMaintenance.model.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import { deleteFromS3, processAndUploadImages } from "../utils/s3.js";
-import { calculateExtraAmount } from "../utils/bikePricing.js";
+import {
+  calculateExtraAmount,
+  calculateRentalPricing,
+} from "../utils/bikePricing.js";
 
 // @desc    Get all bikes
 // @route   GET /api/bikes
@@ -414,15 +417,37 @@ export const getBikes = asyncHandler(async (req, res) => {
 });
 
 // Update the getBike function to ensure availableQuantity is included in the response
+// controllers/bikeController.js
+// controllers/bikeController.js
 export const getBike = asyncHandler(async (req, res) => {
-  const { startDate, startTime, endDate, endTime } = req.query;
+  const { startDate, startTime, endDate, endTime, kmOption } = req.query;
   const bike = await Bike.findById(req.params.id);
 
   if (!bike) {
     throw new ApiError("Bike not found", 404);
   }
 
-  // Get current bookings for this bike
+  let pricing = null;
+
+  if (startDate && startTime && endDate && endTime) {
+    try {
+      pricing = calculateRentalPricing({
+        bike,
+        startDate,
+        startTime,
+        endDate,
+        endTime,
+        kmOption,
+      });
+    } catch (error) {
+      return res.status(400).json({
+        success: false,
+        message: error.message,
+      });
+    }
+  }
+
+  // Get availability
   const currentBookings = await Booking.countDocuments({
     bike: req.params.id,
     bookingType: "bike",
@@ -431,22 +456,9 @@ export const getBike = asyncHandler(async (req, res) => {
     endDate: { $gte: new Date() },
   });
 
-  // Create a response object with accurate available quantity
   const bikeResponse = bike.toObject();
-
-  console.log("🚀 ~ getBike ~ startTime:", startTime, endTime);
-  const pricing = calculateExtraAmount({
-    bike,
-    startTime,
-    endTime,
-  });
-  bikeResponse.extraAmount = pricing;
-
-  // Ensure availableQuantity is never negative
-  bikeResponse.availableQuantity = Math.max(
-    0,
-    (bike.quantity || 1) - currentBookings
-  );
+  bikeResponse.availableQuantity = Math.max(0, bike.quantity - currentBookings);
+  bikeResponse.pricing = pricing;
 
   res.status(200).json({
     success: true,

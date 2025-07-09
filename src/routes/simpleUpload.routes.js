@@ -18,7 +18,7 @@ const upload = multer({
 });
 
 // Route for file upload
-router.post("/files", protect, upload.array("files", 10), simpleUpload);
+router.post("/files", upload.array("files", 10), simpleUpload);
 
 // Route for base64 upload
 router.post("/base64", protect, simpleUploadBase64);
