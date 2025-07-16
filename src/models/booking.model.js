@@ -72,6 +72,14 @@ const bookingSchema = new mongoose.Schema(
         type: Number,
         default: 0,
       },
+      helmetCharges: {
+        type: Number,
+        default: 0,
+      },
+      extraAmount: {
+        type: Number,
+        default: 0,
+      },
       totalAmount: {
         type: Number,
         required: [true, "Please add a total amount"],
@@ -112,6 +120,15 @@ const bookingSchema = new mongoose.Schema(
         required: function () {
           return this.bookingType === "bike";
         },
+      },
+      helmetQuantity: {
+        type: Number,
+        default: 0,
+        min: [0, "Helmet quantity cannot be negative"],
+      },
+      helmetCharges: {
+        type: Number,
+        default: 0,
       },
       documentsSubmitted: {
         idProof: {

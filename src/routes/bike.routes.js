@@ -17,6 +17,10 @@ import {
   adminProtect,
   employeeProtect,
 } from "../middleware/auth.middleware.js";
+import {
+  getHelmetInfo,
+  updateHelmetSettings,
+} from "../controllers/booking.controller.js";
 
 const router = express.Router();
 
@@ -27,6 +31,8 @@ router.get("/available", getAvailableBikes);
 router.get("/:id", getBike);
 
 // Admin routes
+router.get("/healmets", getHelmetInfo);
+router.put("/healmets", updateHelmetSettings);
 router.post("/", adminProtect, createBike);
 router.put("/:id", adminProtect, updateBike);
 router.delete("/:id", adminProtect, deleteBike);

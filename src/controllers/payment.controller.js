@@ -91,6 +91,7 @@ function formatTime(time) {
 export const createBookingPayment = asyncHandler(async (req, res) => {
   // Get booking
   const booking = await Booking.findById(req.params.id);
+  console.log("🚀 ~ createBookingPayment ~ req:", req?.user);
   // console.log("🚀 ~ createBookingPayment ~ booking:", booking);
 
   if (!booking) {

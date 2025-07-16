@@ -79,6 +79,7 @@ const bikeSchema = new mongoose.Schema(
       required: [true, "Please add a location"],
     },
     features: [String],
+
     requiredDocuments: [
       {
         type: String,

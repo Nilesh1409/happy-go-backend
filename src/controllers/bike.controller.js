@@ -1,10 +1,15 @@
 import Bike from "../models/bike.model.js";
 import Booking from "../models/booking.model.js";
+import helmet from "../models/helmet.model.js";
+import Helmet from "../models/helmet.model.js";
 import BikeMaintenance from "../models/bikeMaintenance.model.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import { deleteFromS3, processAndUploadImages } from "../utils/s3.js";
-import { calculateExtraAmount } from "../utils/bikePricing.js";
+import {
+  calculateExtraAmount,
+  calculateRentalPricing,
+} from "../utils/bikePricing.js";
 
 // @desc    Get all bikes
 // @route   GET /api/bikes
@@ -147,14 +152,31 @@ export const getAvailableBikes = asyncHandler(async (req, res) => {
     throw new ApiError("Start date/time must be before end date/time", 400);
   }
 
+  // Helper function to check if it's weekend (Friday=5, Saturday=6, Sunday=0, Monday=1)
+  const isWeekend = (date) => {
+    const day = date.getDay();
+    return day === 0 || day === 1 || day === 5 || day === 6; // Sunday, Monday, Friday, Saturday
+  };
+
+  // Check if the booking period includes any weekend days
+  const isBookingDuringWeekend = () => {
+    const current = new Date(startRequested);
+    while (current <= endRequested) {
+      if (isWeekend(current)) {
+        return true;
+      }
+      current.setDate(current.getDate() + 1);
+    }
+    return false;
+  };
+
+  const bookingIncludesWeekend = isBookingDuringWeekend();
+
   // 3. Load all active bikes with optional location filter
   const bikeQuery = {
     isAvailable: true,
     status: { $ne: "unavailable" },
   };
-  // if (location) {
-  //   bikeQuery.location = { $regex: location, $options: "i" }; // Case-insensitive match
-  // }
   const bikes = await Bike.find(bikeQuery);
 
   // 4. Load bookings that overlap with the requested period
@@ -188,7 +210,6 @@ export const getAvailableBikes = asyncHandler(async (req, res) => {
     }
     return map;
   }, {});
-  // console.log("🚀 ~ bookingsByBike ~ rawBookings:", rawBookings);
 
   // 6. Process each bike and determine availability
   const result = bikes.map((bike) => {
@@ -196,32 +217,33 @@ export const getAvailableBikes = asyncHandler(async (req, res) => {
     const total = bike.quantity;
     const overlappingBookings = bookingsByBike[id] || [];
     const count = overlappingBookings.length;
-    console.log("🚀 ~ result ~ count:", count, total, bookingsByBike);
+
+    // Create a modified bike object with weekend pricing logic
+    const bikeObject = bike.toObject();
+
+    // Modify limitedKm.isActive based on weekend check
+    if (bookingIncludesWeekend) {
+      bikeObject.pricePerDay.limitedKm.isActive = false;
+    }
 
     if (count < total) {
       // Bike is available
-
-      // Extra charges for early pick or late drop-off
       let extraAmount = 0;
 
       try {
         const pricing = calculateExtraAmount({
-          bike,
+          bike: { ...bike.toObject(), pricePerDay: bikeObject.pricePerDay }, // Use modified pricing
           startTime,
           endTime,
         });
-        // console.log("🚀 ~ result ~ pricing:", pricing);
-        // pricing.extraAmount = earlyPickupFee + lateDropFee
         extraAmount = pricing;
       } catch (err) {
         console.log("🚀 ~ result ~ err:", err);
-        // If, e.g., unlimited mode was requested but isInactive, or any error:
-        // swallow and leave extraAmount = 0.
         extraAmount = 0;
       }
 
       return {
-        ...bike.toObject(),
+        ...bikeObject,
         isAvailable: true,
         availableUnits: total - count,
         extraAmount: extraAmount,
@@ -236,7 +258,7 @@ export const getAvailableBikes = asyncHandler(async (req, res) => {
         : null;
 
       return {
-        ...bike.toObject(),
+        ...bikeObject,
         isAvailable: false,
         availableUnits: 0,
         nextAvailable,
@@ -414,15 +436,38 @@ export const getBikes = asyncHandler(async (req, res) => {
 });
 
 // Update the getBike function to ensure availableQuantity is included in the response
+// controllers/bikeController.js
+// controllers/bikeController.js
+// In getBike function, add helmet data
 export const getBike = asyncHandler(async (req, res) => {
-  const { startDate, startTime, endDate, endTime } = req.query;
+  const { startDate, startTime, endDate, endTime, kmOption } = req.query;
   const bike = await Bike.findById(req.params.id);
 
   if (!bike) {
     throw new ApiError("Bike not found", 404);
   }
 
-  // Get current bookings for this bike
+  let pricing = null;
+
+  if (startDate && startTime && endDate && endTime) {
+    try {
+      pricing = calculateRentalPricing({
+        bike,
+        startDate,
+        startTime,
+        endDate,
+        endTime,
+        kmOption,
+      });
+    } catch (error) {
+      return res.status(400).json({
+        success: false,
+        message: error.message,
+      });
+    }
+  }
+
+  // Get bike availability
   const currentBookings = await Booking.countDocuments({
     bike: req.params.id,
     bookingType: "bike",
@@ -431,22 +476,47 @@ export const getBike = asyncHandler(async (req, res) => {
     endDate: { $gte: new Date() },
   });
 
-  // Create a response object with accurate available quantity
+  // Get helmet availability
+  const helmet = await Helmet.findOne({ isActive: true });
+  let helmetInfo = null;
+
+  if (helmet && startDate && endDate) {
+    // Check helmet bookings for the requested period
+    const helmetBookings = await Booking.aggregate([
+      {
+        $match: {
+          bookingType: "bike",
+          bookingStatus: { $in: ["confirmed", "pending"] },
+          startDate: { $lte: new Date(endDate) },
+          endDate: { $gte: new Date(startDate) },
+          "bikeDetails.helmetQuantity": { $gt: 0 },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalHelmetBookings: { $sum: "$bikeDetails.helmetQuantity" },
+        },
+      },
+    ]);
+
+    const bookedHelmets = helmetBookings[0]?.totalHelmetBookings || 0;
+    const availableHelmets = Math.max(0, helmet.totalQuantity - bookedHelmets);
+
+    helmetInfo = {
+      available: availableHelmets,
+      pricePerHelmet: helmet.pricePerHelmet,
+      freeHelmetPerBooking: helmet.freeHelmetPerBooking,
+      maxQuantity: Math.min(availableHelmets, 10), // reasonable limit
+    };
+    console.log("helmetInfo1", helmetInfo);
+  }
+
   const bikeResponse = bike.toObject();
-
-  console.log("🚀 ~ getBike ~ startTime:", startTime, endTime);
-  const pricing = calculateExtraAmount({
-    bike,
-    startTime,
-    endTime,
-  });
-  bikeResponse.extraAmount = pricing;
-
-  // Ensure availableQuantity is never negative
-  bikeResponse.availableQuantity = Math.max(
-    0,
-    (bike.quantity || 1) - currentBookings
-  );
+  bikeResponse.availableQuantity = Math.max(0, bike.quantity - currentBookings);
+  bikeResponse.pricing = pricing;
+  bikeResponse.helmetInfo = helmetInfo;
+  console.log("helmetInfo", helmetInfo);
 
   res.status(200).json({
     success: true,
