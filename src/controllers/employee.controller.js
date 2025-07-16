@@ -445,6 +445,8 @@ export const getEmployeeBookingById = asyncHandler(async (req, res) => {
     status: booking.bookingStatus,
     startDate: booking.startDate,
     endDate: booking.endDate,
+    startTime: booking.startTime || null,
+    endTime: booking.endTime || null,
     amount: booking.priceDetails.totalAmount,
     paymentStatus: booking.paymentStatus,
     paymentMethod: booking.paymentId ? "Online Payment" : "Cash on Delivery",

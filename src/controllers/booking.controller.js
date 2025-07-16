@@ -5,6 +5,7 @@ import User from "../models/user.model.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import { sendEmail } from "../utils/sendEmail.js";
+import Helmet from "../models/helmet.model.js";
 // const mongoose = require("mongoose");
 
 // @desc    Create new booking
@@ -36,7 +37,7 @@ export const createBooking = asyncHandler(async (req, res) => {
 
   // Validate required fields based on booking type
   if (bookingType === "bike") {
-    // 2. Validate required bike fields
+    // Validate required bike fields
     if (
       !bikeId ||
       !startDate ||
@@ -51,15 +52,60 @@ export const createBooking = asyncHandler(async (req, res) => {
       );
     }
 
-    // 3. Fetch bike document
+    // Fetch bike document
     const bike = await Bike.findById(bikeId);
     if (!bike) {
       throw new ApiError("Bike not found", 404);
     }
 
-    // 4. Parse requested start/end as Date objects
-    //    We assume startDate/endDate are ISO date‐only strings: "YYYY-MM-DD"
-    //    and startTime/endTime are "HH:mm"
+    // HELMET VALIDATION - ADD THIS SECTION
+    let helmetCharges = 0;
+    const requestedHelmets = bikeDetails.helmetQuantity || 0;
+
+    if (requestedHelmets > 0) {
+      const helmet = await Helmet.findOne({ isActive: true });
+      if (!helmet) {
+        throw new ApiError("Helmet service is currently unavailable", 400);
+      }
+
+      // Check helmet availability for the requested period
+      const helmetBookings = await Booking.aggregate([
+        {
+          $match: {
+            bookingType: "bike",
+            bookingStatus: { $in: ["confirmed", "pending"] },
+            startDate: { $lte: new Date(endDate) },
+            endDate: { $gte: new Date(startDate) },
+            "bikeDetails.helmetQuantity": { $gt: 0 },
+          },
+        },
+        {
+          $group: {
+            _id: null,
+            totalHelmetBookings: { $sum: "$bikeDetails.helmetQuantity" },
+          },
+        },
+      ]);
+
+      const bookedHelmets = helmetBookings[0]?.totalHelmetBookings || 0;
+      const availableHelmets = helmet.totalQuantity - bookedHelmets;
+
+      if (requestedHelmets > availableHelmets) {
+        throw new ApiError(
+          `Only ${availableHelmets} helmets available for the selected period`,
+          400
+        );
+      }
+
+      // Calculate helmet charges (1 free, rest chargeable)
+      const chargeableHelmets = Math.max(
+        0,
+        requestedHelmets - helmet.freeHelmetPerBooking
+      );
+      helmetCharges = chargeableHelmets * helmet.pricePerHelmet;
+    }
+
+    // Parse requested start/end as Date objects
     const startRequested = new Date(`${startDate}T${startTime}:00`);
     const endRequested = new Date(`${endDate}T${endTime}:00`);
 
@@ -70,8 +116,7 @@ export const createBooking = asyncHandler(async (req, res) => {
       throw new ApiError("Start date/time must be before end date/time", 400);
     }
 
-    // 5. Build a query to load all existing bike bookings that could overlap
-    //    with the requested date‐range (date‐only portion, inclusive)
+    // Build a query to load all existing bike bookings that could overlap
     const startDateOnly = new Date(startDate);
     startDateOnly.setHours(0, 0, 0, 0);
     const endDateOnly = new Date(endDate);
@@ -83,11 +128,10 @@ export const createBooking = asyncHandler(async (req, res) => {
       bookingStatus: { $in: ["confirmed"] },
       startDate: { $lte: endDateOnly },
       endDate: { $gte: startDateOnly },
-    }).select("startDate endDate startTime endTime bike"); // only pull fields we need
+    }).select("startDate endDate startTime endTime bike");
 
-    // 6. Group those bookings by bikeId (though here it's always one bikeId)
+    // Group those bookings by bikeId
     const bookingsByBike = rawBookings.reduce((map, bk) => {
-      // Build actual Date objects for the existing booking's start/end
       const bStart = new Date(bk.startDate);
       const [sh, sm] = bk.startTime.split(":").map(Number);
       bStart.setHours(sh, sm, 0, 0);
@@ -96,8 +140,6 @@ export const createBooking = asyncHandler(async (req, res) => {
       const [eh, em] = bk.endTime.split(":").map(Number);
       bEnd.setHours(eh, em, 0, 0);
 
-      // Inclusive overlap check:
-      //    (bStart <= endRequested) && (bEnd >= startRequested)
       if (bStart <= endRequested && bEnd >= startRequested) {
         const idStr = bk.bike.toString();
         if (!map[idStr]) map[idStr] = [];
@@ -106,24 +148,17 @@ export const createBooking = asyncHandler(async (req, res) => {
       return map;
     }, {});
 
-    // 7. Determine how many units of this bike type are already overlapping
+    // Determine how many units of this bike type are already overlapping
     const bikeIdStr = bike._id.toString();
     const overlappingBookings = bookingsByBike[bikeIdStr] || [];
     const alreadyBookedCount = overlappingBookings.length;
-    const totalUnits = bike.quantity; // assume "quantity" is total copies/units available
-    console.log(
-      "🚀 ~ createBooking ~ totalUnits = bike.quantity;:",
-      totalUnits,
-      alreadyBookedCount,
-      bookingsByBike
-    );
+    const totalUnits = bike.quantity;
 
     if (alreadyBookedCount >= totalUnits) {
-      // No unit free for the requested date+time window
       throw new ApiError("Bike is not available for the selected period", 400);
     }
 
-    // 8. Validate pricing options (unlimited vs limitedKm)
+    // Validate pricing options
     if (bikeDetails.isUnlimited && !bike.pricePerDay.unlimited.isActive) {
       throw new ApiError(
         "Unlimited km option is not available for this bike",
@@ -137,7 +172,7 @@ export const createBooking = asyncHandler(async (req, res) => {
       );
     }
 
-    // 9. Calculate extra charges for early pickup / late drop‐off
+    // Calculate extra charges for early pickup / late drop‐off
     let extraAmount = 0;
     try {
       const pricing = calculateExtraAmount({
@@ -147,19 +182,18 @@ export const createBooking = asyncHandler(async (req, res) => {
       });
       extraAmount = pricing || 0;
     } catch (err) {
-      // If calculateExtraAmount throws (e.g. invalid state), swallow and continue with extraAmount = 0
       console.warn("calculateExtraAmount error:", err.message);
       extraAmount = 0;
     }
 
-    // 10. Decrement availableQuantity and possibly update status
+    // Update bike availability
     bike.availableQuantity = bike.availableQuantity - 1;
     if (bike.availableQuantity <= 0) {
       bike.status = "booked";
     }
     await bike.save();
 
-    // 11. Build the booking document now that availability is confirmed
+    // Create booking with helmet details
     const booking = await Booking.create({
       user: req.user._id,
       bookingType: "bike",
@@ -171,14 +205,18 @@ export const createBooking = asyncHandler(async (req, res) => {
       startTime,
       endTime,
       numberOfPeople: undefined,
-      // priceDetails: assume the client already calculated basePrice.
-      // You can also add `extraAmount` here or recompute total on server:
       priceDetails: {
         ...priceDetails,
         extraAmount,
-        totalAmount: (priceDetails.totalAmount || 0) + extraAmount,
+        helmetCharges, // ADD THIS
+        totalAmount:
+          (priceDetails.totalAmount || 0) + extraAmount + helmetCharges,
       },
-      bikeDetails,
+      bikeDetails: {
+        ...bikeDetails,
+        helmetQuantity: requestedHelmets,
+        helmetCharges,
+      },
       hotelDetails: undefined,
       couponCode,
       specialRequests,
@@ -186,7 +224,7 @@ export const createBooking = asyncHandler(async (req, res) => {
       bookingStatus: "pending",
     });
 
-    // 12. Send confirmation email & SMS
+    // Send confirmation email & SMS
     const user = await User.findById(req.user._id).select("name email mobile");
     const emailMessage = `
       <h1>Bike Booking Confirmation</h1>
@@ -197,24 +235,22 @@ export const createBooking = asyncHandler(async (req, res) => {
         startDate + "T" + startTime + ":00"
       ).toLocaleString()}</p>
       <p>End: ${new Date(endDate + "T" + endTime + ":00").toLocaleString()}</p>
+      <p>Helmets: ${requestedHelmets}</p>
+      <p>Helmet Charges: ₹${helmetCharges.toFixed(2)}</p>
       <p>Extra Charges: ₹${extraAmount.toFixed(2)}</p>
       <p>Total Amount: ₹${(
-        (priceDetails.totalAmount || 0) + extraAmount
+        (priceDetails.totalAmount || 0) +
+        extraAmount +
+        helmetCharges
       ).toFixed(2)}</p>
       <p>Thank you for choosing HappyGo!</p>
     `;
+
     await sendEmail({
       email: user.email,
       subject: "HappyGo Bike Booking Confirmation",
       message: emailMessage,
     });
-
-    const smsMessage = `Your HappyGo bike booking is confirmed (ID: ${
-      booking._id
-    }). Total: ₹${((priceDetails.totalAmount || 0) + extraAmount).toFixed(
-      2
-    )}. Thank you!`;
-    // await sendSMS({ phone: user.mobile, message: smsMessage });
 
     return res.status(201).json({
       success: true,
@@ -1496,6 +1532,55 @@ export const cancelBooking = asyncHandler(async (req, res) => {
     success: true,
     message: "Booking cancelled successfully",
     booking,
+  });
+});
+
+// Get helmet info
+export const getHelmetInfo = asyncHandler(async (req, res) => {
+  const helmet = await Helmet.findOne({ isActive: true });
+
+  if (!helmet) {
+    return res.status(404).json({
+      success: false,
+      message: "Helmet service not available",
+    });
+  }
+
+  res.status(200).json({
+    success: true,
+    data: helmet,
+  });
+});
+
+// Update helmet settings (Admin only)
+export const updateHelmetSettings = asyncHandler(async (req, res) => {
+  console.log(
+    "🚀 ~ updateHelmetSettings ~ updateHelmetSettings:",
+    updateHelmetSettings
+  );
+  const { totalQuantity, pricePerHelmet, freeHelmetPerBooking } = req.body;
+
+  let helmet = await Helmet.findOne({ isActive: true });
+
+  if (!helmet) {
+    helmet = await Helmet.create({
+      totalQuantity,
+      availableQuantity: totalQuantity,
+      pricePerHelmet: pricePerHelmet || 60,
+      freeHelmetPerBooking: freeHelmetPerBooking || 1,
+    });
+  } else {
+    helmet.totalQuantity = totalQuantity || helmet.totalQuantity;
+    helmet.availableQuantity = totalQuantity || helmet.availableQuantity;
+    helmet.pricePerHelmet = pricePerHelmet || helmet.pricePerHelmet;
+    helmet.freeHelmetPerBooking =
+      freeHelmetPerBooking || helmet.freeHelmetPerBooking;
+    await helmet.save();
+  }
+
+  res.status(200).json({
+    success: true,
+    data: helmet,
   });
 });
 

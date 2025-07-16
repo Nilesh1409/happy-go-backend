@@ -144,9 +144,9 @@ function calculateTimeBasedCharges(startTime, endTime) {
     extraCharges += 100;
   }
 
-  if (endDecimal > 20.5) {
+  if (endDecimal > 20) {
     if (endDecimal <= 22) {
-      const lateHours = endDecimal - 20.5;
+      const lateHours = endDecimal - 20;
       const slots = Math.ceil(lateHours * 2);
       extraCharges += slots * 50;
     } else if (endDecimal <= 22.5) {
