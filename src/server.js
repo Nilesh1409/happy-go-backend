@@ -53,7 +53,7 @@ app.use("/api", apiLimiter);
 
 // Serve static files from uploads directory
 app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
-
+console.log("test CI/CD")
 // Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
