@@ -99,16 +99,296 @@ import {
 //   });
 // });
 
-// @desc    Get trending bikes
-// @route   GET /api/bikes/trending
+// @desc    Get trending bikes with pricing calculations and price filtering
+// @route   GET /api/bikes/trending?minPrice=0&maxPrice=500&kmOption=limited
 // @access  Public
 export const getTrendingBikes = asyncHandler(async (req, res) => {
+  const { minPrice, maxPrice, kmOption = "limited" } = req.query;
+
+  // Validate price parameters
+  if (minPrice && isNaN(Number(minPrice))) {
+    throw new ApiError("Invalid minPrice parameter", 400);
+  }
+  if (maxPrice && isNaN(Number(maxPrice))) {
+    throw new ApiError("Invalid maxPrice parameter", 400);
+  }
+  if (minPrice && maxPrice && Number(minPrice) > Number(maxPrice)) {
+    throw new ApiError("minPrice cannot be greater than maxPrice", 400);
+  }
+  if (!["limited", "unlimited"].includes(kmOption)) {
+    throw new ApiError("kmOption must be either 'limited' or 'unlimited'", 400);
+  }
+  // Calculate smart default dates and times using Indian Standard Time (IST)
+  const getDefaultSearchPeriod = () => {
+    // Get current time in IST (UTC+5:30)
+    const now = new Date();
+    const istOffset = 5.5 * 60 * 60 * 1000; // IST is UTC+5:30
+    const istTime = new Date(now.getTime() + istOffset);
+    
+    // Get current IST hour and minute
+    const currentHour = istTime.getUTCHours();
+    const currentMinute = istTime.getUTCMinutes();
+    
+    let startDate = new Date(istTime);
+    let startHour, startMinute;
+    
+    // Business logic for start time calculation
+    if (currentHour < 8) {
+      // If before 8am IST, start at 8am today
+      startHour = 8;
+      startMinute = 0;
+    } else if (currentHour >= 19 && currentMinute >= 30) {
+      // If 7:30pm IST or later, move to next day at 8am
+      startDate.setUTCDate(startDate.getUTCDate() + 1);
+      startHour = 8;
+      startMinute = 0;
+    } else {
+      // Round up to next 30-minute block, ensuring it's greater than current time
+      let nextHour = currentHour;
+      let nextMinute;
+      
+      if (currentMinute < 30) {
+        nextMinute = 30;
+      } else {
+        nextHour = currentHour + 1;
+        nextMinute = 0;
+      }
+      
+      // If the calculated time is not greater than current time, move to next slot
+      if (nextHour === currentHour && nextMinute <= currentMinute) {
+        if (nextMinute === 30) {
+          nextHour = currentHour + 1;
+          nextMinute = 0;
+        } else {
+          nextMinute = 30;
+        }
+      }
+      
+      startHour = nextHour;
+      startMinute = nextMinute;
+    }
+    
+    // End date is same as start date, end time is always 8pm (20:00)
+    let endDate = new Date(startDate);
+    const endHour = 20;
+    const endMinute = 0;
+    
+    // Convert back to local dates for API response (YYYY-MM-DD format)
+    const startDateStr = startDate.getUTCFullYear() + '-' + 
+                        String(startDate.getUTCMonth() + 1).padStart(2, '0') + '-' + 
+                        String(startDate.getUTCDate()).padStart(2, '0');
+    
+    const endDateStr = endDate.getUTCFullYear() + '-' + 
+                      String(endDate.getUTCMonth() + 1).padStart(2, '0') + '-' + 
+                      String(endDate.getUTCDate()).padStart(2, '0');
+    
+    // Format times as HH:mm
+    const startTimeStr = `${String(startHour).padStart(2, '0')}:${String(startMinute).padStart(2, '0')}`;
+    const endTimeStr = `${String(endHour).padStart(2, '0')}:${String(endMinute).padStart(2, '0')}`;
+    
+    return {
+      startDate: startDateStr,
+      endDate: endDateStr,
+      startTime: startTimeStr,
+      endTime: endTimeStr
+    };
+  };
+
+  const { startDate, endDate, startTime, endTime } = getDefaultSearchPeriod();
+  
+  // Get trending bikes
   const bikes = await Bike.find({ isTrending: true }).limit(10);
+
+  // Build Date objects for requested period
+  const startRequested = new Date(`${startDate}T${startTime}:00`);
+  const endRequested = new Date(`${endDate}T${endTime}:00`);
+
+  // Helper function to check if it's weekend (Friday=5, Saturday=6, Sunday=0, Monday=1)
+  const isWeekend = (date) => {
+    const day = date.getDay();
+    return day === 0 || day === 1 || day === 5 || day === 6; // Sunday, Monday, Friday, Saturday
+  };
+
+  // Check if the booking period includes any weekend days
+  const isBookingDuringWeekend = () => {
+    const current = new Date(startRequested);
+    while (current <= endRequested) {
+      if (isWeekend(current)) {
+        return true;
+      }
+      current.setDate(current.getDate() + 1);
+    }
+    return false;
+  };
+
+  const bookingIncludesWeekend = isBookingDuringWeekend();
+
+  // Load bookings that overlap with the requested period
+  const startDateOnly = new Date(startDate);
+  startDateOnly.setHours(0, 0, 0, 0);
+  const endDateOnly = new Date(endDate);
+  endDateOnly.setHours(23, 59, 59, 999);
+
+  const rawBookings = await Booking.find({
+    bookingType: "bike",
+    bookingStatus: { $in: ["confirmed"] },
+    startDate: { $lte: endDateOnly },
+    endDate: { $gte: startDateOnly },
+  });
+
+  // Group bookings by bike and filter for true date+time overlap
+  const bookingsByBike = rawBookings.reduce((map, bk) => {
+    const bStart = new Date(bk.startDate);
+    const [sh, sm] = bk.startTime.split(":").map(Number);
+    bStart.setHours(sh, sm, 0, 0);
+
+    const bEnd = new Date(bk.endDate);
+    const [eh, em] = bk.endTime.split(":").map(Number);
+    bEnd.setHours(eh, em, 0, 0);
+
+    // Inclusive overlap check
+    if (bStart <= endRequested && bEnd >= startRequested) {
+      const id = bk.bike.toString();
+      map[id] = map[id] || [];
+      map[id].push({ start: bStart, end: bEnd });
+    }
+    return map;
+  }, {});
+
+  // Process each trending bike with pricing and availability
+  const result = bikes.map((bike) => {
+    const id = bike._id.toString();
+    const total = bike.quantity;
+    const overlappingBookings = bookingsByBike[id] || [];
+    const count = overlappingBookings.length;
+
+    // Create a modified bike object with weekend pricing logic
+    const bikeObject = bike.toObject();
+
+    // Modify limitedKm.isActive based on weekend check
+    if (bookingIncludesWeekend) {
+      bikeObject.pricePerDay.limitedKm.isActive = false;
+    }
+
+    // Calculate pricing for both limited and unlimited options
+    let priceLimited = null;
+    let priceUnlimited = null;
+
+    try {
+      // Calculate limited km pricing (if active and not weekend)
+      if (bikeObject.pricePerDay?.limitedKm?.isActive) {
+        try {
+          const limitedPricing = calculateRentalPricing({
+            bike: bikeObject,
+            startDate,
+            startTime,
+            endDate,
+            endTime,
+            kmOption: "limited",
+          });
+          priceLimited = {
+            totalPrice: limitedPricing.totalPrice,
+            breakdown: limitedPricing.breakdown,
+            isWeekendBooking: limitedPricing.isWeekendBooking,
+          };
+        } catch (err) {
+          console.log(`Limited pricing calculation failed for trending bike ${bike._id}:`, err.message);
+          priceLimited = null;
+        }
+      }
+
+      // Calculate unlimited km pricing (if active)
+      if (bikeObject.pricePerDay?.unlimited?.isActive) {
+        try {
+          const unlimitedPricing = calculateRentalPricing({
+            bike: bikeObject,
+            startDate,
+            startTime,
+            endDate,
+            endTime,
+            kmOption: "unlimited",
+          });
+          priceUnlimited = {
+            totalPrice: unlimitedPricing.totalPrice,
+            breakdown: unlimitedPricing.breakdown,
+            isWeekendBooking: unlimitedPricing.isWeekendBooking,
+          };
+        } catch (err) {
+          console.log(`Unlimited pricing calculation failed for trending bike ${bike._id}:`, err.message);
+          priceUnlimited = null;
+        }
+      }
+    } catch (error) {
+      console.log(`Pricing calculation error for trending bike ${bike._id}:`, error.message);
+    }
+
+    return {
+      ...bikeObject,
+      isAvailable: count < total,
+      availableUnits: Math.max(0, total - count),
+      // Add pricing calculations
+      priceLimited,
+      priceUnlimited,
+      defaultSearchPeriod: {
+        startDate,
+        endDate,
+        startTime,
+        endTime,
+      },
+    };
+  });
+
+  // Apply price filtering if minPrice or maxPrice is provided
+  let filteredResult = result;
+  
+  if (minPrice !== undefined || maxPrice !== undefined) {
+    filteredResult = result.filter((bike) => {
+      // Determine which pricing to use for filtering
+      let priceToCheck = null;
+      
+      // First, try to use the preferred kmOption
+      if (kmOption === "limited" && bike.priceLimited) {
+        priceToCheck = bike.priceLimited.totalPrice;
+      } else if (kmOption === "unlimited" && bike.priceUnlimited) {
+        priceToCheck = bike.priceUnlimited.totalPrice;
+      } else {
+        // Fallback: use whichever option is available
+        if (bike.priceLimited) {
+          priceToCheck = bike.priceLimited.totalPrice;
+        } else if (bike.priceUnlimited) {
+          priceToCheck = bike.priceUnlimited.totalPrice;
+        }
+      }
+      
+      // If no pricing is available, exclude from results
+      if (priceToCheck === null) {
+        return false;
+      }
+      
+      // Apply price range filtering
+      const min = minPrice ? Number(minPrice) : 0;
+      const max = maxPrice ? Number(maxPrice) : Infinity;
+      
+      return priceToCheck >= min && priceToCheck <= max;
+    });
+  }
 
   res.status(200).json({
     success: true,
-    count: bikes.length,
-    data: bikes,
+    count: filteredResult.length,
+    data: filteredResult,
+    defaultSearchPeriod: {
+      startDate,
+      endDate,
+      startTime,
+      endTime,
+    },
+    filters: {
+      minPrice: minPrice ? Number(minPrice) : null,
+      maxPrice: maxPrice ? Number(maxPrice) : null,
+      kmOption,
+      appliedFilters: minPrice !== undefined || maxPrice !== undefined,
+    },
   });
 });
 
@@ -128,7 +408,7 @@ export const getTrendingBikes = asyncHandler(async (req, res) => {
 //   });
 // });
 
-// @desc    Get available bikes
+// @desc    Get available bikes with pricing calculations for both limited and unlimited km options
 // @route   GET /api/bikes/available
 // @access  Public
 export const getAvailableBikes = asyncHandler(async (req, res) => {
@@ -211,7 +491,7 @@ export const getAvailableBikes = asyncHandler(async (req, res) => {
     return map;
   }, {});
 
-  // 6. Process each bike and determine availability
+  // 6. Process each bike and determine availability with pricing
   const result = bikes.map((bike) => {
     const id = bike._id.toString();
     const total = bike.quantity;
@@ -224,6 +504,58 @@ export const getAvailableBikes = asyncHandler(async (req, res) => {
     // Modify limitedKm.isActive based on weekend check
     if (bookingIncludesWeekend) {
       bikeObject.pricePerDay.limitedKm.isActive = false;
+    }
+
+    // Calculate pricing for both limited and unlimited options
+    let priceLimited = null;
+    let priceUnlimited = null;
+
+    try {
+      // Calculate limited km pricing (if active and not weekend)
+      if (bikeObject.pricePerDay?.limitedKm?.isActive) {
+        try {
+          const limitedPricing = calculateRentalPricing({
+            bike: bikeObject,
+            startDate,
+            startTime,
+            endDate,
+            endTime,
+            kmOption: "limited",
+          });
+          priceLimited = {
+            totalPrice: limitedPricing.totalPrice,
+            breakdown: limitedPricing.breakdown,
+            isWeekendBooking: limitedPricing.isWeekendBooking,
+          };
+        } catch (err) {
+          console.log(`Limited pricing calculation failed for bike ${bike._id}:`, err.message);
+          priceLimited = null;
+        }
+      }
+
+      // Calculate unlimited km pricing (if active)
+      if (bikeObject.pricePerDay?.unlimited?.isActive) {
+        try {
+          const unlimitedPricing = calculateRentalPricing({
+            bike: bikeObject,
+            startDate,
+            startTime,
+            endDate,
+            endTime,
+            kmOption: "unlimited",
+          });
+          priceUnlimited = {
+            totalPrice: unlimitedPricing.totalPrice,
+            breakdown: unlimitedPricing.breakdown,
+            isWeekendBooking: unlimitedPricing.isWeekendBooking,
+          };
+        } catch (err) {
+          console.log(`Unlimited pricing calculation failed for bike ${bike._id}:`, err.message);
+          priceUnlimited = null;
+        }
+      }
+    } catch (error) {
+      console.log(`Pricing calculation error for bike ${bike._id}:`, error.message);
     }
 
     if (count < total) {
@@ -247,6 +579,15 @@ export const getAvailableBikes = asyncHandler(async (req, res) => {
         isAvailable: true,
         availableUnits: total - count,
         extraAmount: extraAmount,
+        // Add pricing calculations
+        priceLimited,
+        priceUnlimited,
+        searchPeriod: {
+          startDate,
+          endDate,
+          startTime,
+          endTime,
+        },
       };
     } else {
       // Bike is unavailable, calculate next available time
@@ -262,13 +603,22 @@ export const getAvailableBikes = asyncHandler(async (req, res) => {
         isAvailable: false,
         availableUnits: 0,
         nextAvailable,
+        // Add pricing calculations even for unavailable bikes
+        priceLimited,
+        priceUnlimited,
+        searchPeriod: {
+          startDate,
+          endDate,
+          startTime,
+          endTime,
+        },
       };
     }
   });
 
-  console.log("result", result);
+  // console.log("Available bikes with pricing:", result.length);
 
-  // 7. Return the result
+  // 7. Return the result with pricing calculations
   res.status(200).json({
     success: true,
     count: result.length,

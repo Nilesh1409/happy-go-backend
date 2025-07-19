@@ -33,9 +33,9 @@ router.get("/:id", getBike);
 // Admin routes
 router.get("/healmets", getHelmetInfo);
 router.put("/healmets", updateHelmetSettings);
-router.post("/", adminProtect, createBike);
+router.post("/", employeeProtect, createBike);
 router.put("/:id", adminProtect, updateBike);
-router.delete("/:id", adminProtect, deleteBike);
+router.delete("/:id", employeeProtect, deleteBike);
 
 // Employee routes
 router.post("/:id/maintenance", employeeProtect, addBikeToMaintenance);

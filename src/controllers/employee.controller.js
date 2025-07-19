@@ -172,6 +172,60 @@ export const getDashboardData = asyncHandler(async (req, res) => {
       })
       .sort({ createdAt: -1 })
       .limit(5);
+
+    // Add pending status to bike details
+    if (recentBikeBookings.length > 0) {
+      // Get all bike IDs from recent bookings
+      const bikeIds = recentBikeBookings.map(booking => booking.bike._id);
+      
+      // Get pending bookings for these bikes (same logic as pendingBikeBookings count)
+      const pendingBookingsForBikes = await Booking.find({
+        bookingType: "bike",
+        bike: { $in: bikeIds },
+        createdAt: { $gte: oneWeekAgo },
+        $or: [
+          { bookingStatus: "pending" },
+          { bookingStatus: "confirmed", endDate: { $lte: new Date() } },
+        ],
+      }).select("bike bookingStatus specialRequests createdAt endDate");
+
+      // Create a map of bike ID to pending info
+      const pendingBikeMap = {};
+      pendingBookingsForBikes.forEach(booking => {
+        const bikeId = booking.bike.toString();
+        if (!pendingBikeMap[bikeId]) {
+          let pendingReason = "Awaiting payment confirmation";
+          
+          if (booking.bookingStatus === "pending") {
+            pendingReason = booking.specialRequests || "Awaiting payment confirmation";
+          } else if (booking.bookingStatus === "confirmed" && booking.endDate <= new Date()) {
+            pendingReason = "Booking overdue - needs completion";
+          }
+          
+          pendingBikeMap[bikeId] = {
+            pending: true,
+            pendingReason: pendingReason,
+            pendingSince: booking.createdAt
+          };
+        }
+      });
+
+      // Add pending status to bike details in recent bookings
+      recentBikeBookings = recentBikeBookings.map(booking => {
+        const bookingObj = booking.toObject();
+        const bikeId = booking.bike._id.toString();
+        
+        if (pendingBikeMap[bikeId]) {
+          bookingObj.bike.pending = true;
+          bookingObj.bike.pendingReason = pendingBikeMap[bikeId].pendingReason;
+          bookingObj.bike.pendingSince = pendingBikeMap[bikeId].pendingSince;
+        } else {
+          bookingObj.bike.pending = false;
+        }
+        
+        return bookingObj;
+      });
+    }
   }
 
   if (req.employee.assignedModules.includes("hotel")) {
@@ -206,6 +260,60 @@ export const getDashboardData = asyncHandler(async (req, res) => {
       })
       .sort({ createdAt: -1 })
       .limit(5);
+
+    // Add pending status to hotel details
+    if (recentHotelBookings.length > 0) {
+      // Get all hotel IDs from recent bookings
+      const hotelIds = recentHotelBookings.map(booking => booking.hotel._id);
+      
+      // Get pending bookings for these hotels (same logic as pendingHotelBookings count)
+      const pendingBookingsForHotels = await Booking.find({
+        bookingType: "hotel",
+        hotel: { $in: hotelIds },
+        createdAt: { $gte: oneWeekAgo },
+        $or: [
+          { bookingStatus: "pending" },
+          { bookingStatus: "confirmed", endDate: { $lte: new Date() } },
+        ],
+      }).select("hotel bookingStatus specialRequests createdAt endDate");
+
+      // Create a map of hotel ID to pending info
+      const pendingHotelMap = {};
+      pendingBookingsForHotels.forEach(booking => {
+        const hotelId = booking.hotel.toString();
+        if (!pendingHotelMap[hotelId]) {
+          let pendingReason = "Awaiting payment confirmation";
+          
+          if (booking.bookingStatus === "pending") {
+            pendingReason = booking.specialRequests || "Awaiting payment confirmation";
+          } else if (booking.bookingStatus === "confirmed" && booking.endDate <= new Date()) {
+            pendingReason = "Booking overdue - needs completion";
+          }
+          
+          pendingHotelMap[hotelId] = {
+            pending: true,
+            pendingReason: pendingReason,
+            pendingSince: booking.createdAt
+          };
+        }
+      });
+
+      // Add pending status to hotel details in recent bookings
+      recentHotelBookings = recentHotelBookings.map(booking => {
+        const bookingObj = booking.toObject();
+        const hotelId = booking.hotel._id.toString();
+        
+        if (pendingHotelMap[hotelId]) {
+          bookingObj.hotel.pending = true;
+          bookingObj.hotel.pendingReason = pendingHotelMap[hotelId].pendingReason;
+          bookingObj.hotel.pendingSince = pendingHotelMap[hotelId].pendingSince;
+        } else {
+          bookingObj.hotel.pending = false;
+        }
+        
+        return bookingObj;
+      });
+    }
   }
 
   if (req.employee.assignedModules.includes("product")) {
@@ -234,6 +342,27 @@ export const getDashboardData = asyncHandler(async (req, res) => {
       })
       .sort({ createdAt: -1 })
       .limit(5);
+
+    // Add pending status to order details
+    if (recentOrders.length > 0) {
+      // Add pending status to each order
+      recentOrders = recentOrders.map(order => {
+        const orderObj = order.toObject();
+        
+        // Check if order has pending status
+        if (order.orderStatus === "pending" || order.orderStatus === "processing") {
+          orderObj.pending = true;
+          orderObj.pendingReason = order.orderStatus === "pending" 
+            ? "Order awaiting processing" 
+            : "Order is being processed";
+          orderObj.pendingSince = order.createdAt;
+        } else {
+          orderObj.pending = false;
+        }
+        
+        return orderObj;
+      });
+    }
   }
 
   // Calculate total counts and pending actions

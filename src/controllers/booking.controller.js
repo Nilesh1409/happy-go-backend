@@ -6,6 +6,7 @@ import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import { sendEmail } from "../utils/sendEmail.js";
 import Helmet from "../models/helmet.model.js";
+import { calculateRentalPricing, calculateExtraAmount } from "../utils/bikePricing.js";
 // const mongoose = require("mongoose");
 
 // @desc    Create new booking
@@ -58,10 +59,8 @@ export const createBooking = asyncHandler(async (req, res) => {
       throw new ApiError("Bike not found", 404);
     }
 
-    // HELMET VALIDATION - ADD THIS SECTION
-    let helmetCharges = 0;
+    // Validate helmet availability and charges if requested
     const requestedHelmets = bikeDetails.helmetQuantity || 0;
-
     if (requestedHelmets > 0) {
       const helmet = await Helmet.findOne({ isActive: true });
       if (!helmet) {
@@ -97,12 +96,20 @@ export const createBooking = asyncHandler(async (req, res) => {
         );
       }
 
-      // Calculate helmet charges (1 free, rest chargeable)
-      const chargeableHelmets = Math.max(
-        0,
-        requestedHelmets - helmet.freeHelmetPerBooking
-      );
-      helmetCharges = chargeableHelmets * helmet.pricePerHelmet;
+      // Validate helmet charges calculation
+      const expectedHelmetCharges = Math.max(0, requestedHelmets - helmet.freeHelmetPerBooking) * helmet.pricePerHelmet;
+      const sentHelmetCharges = priceDetails.helmetCharges || 0;
+      
+      if (Math.abs(expectedHelmetCharges - sentHelmetCharges) > 0.01) {
+        console.log("Helmet charges mismatch:", {
+          expected: expectedHelmetCharges,
+          sent: sentHelmetCharges,
+          requestedHelmets,
+          freeHelmets: helmet.freeHelmetPerBooking,
+          pricePerHelmet: helmet.pricePerHelmet
+        });
+        throw new ApiError("Helmet charges calculation mismatch. Please refresh and try again.", 400);
+      }
     }
 
     // Parse requested start/end as Date objects
@@ -172,18 +179,32 @@ export const createBooking = asyncHandler(async (req, res) => {
       );
     }
 
-    // Calculate extra charges for early pickup / late drop‐off
-    let extraAmount = 0;
+    // Validate pricing by recalculating on server side for security
+    let serverPricing;
     try {
-      const pricing = calculateExtraAmount({
+      serverPricing = calculateRentalPricing({
         bike,
+        startDate,
         startTime,
+        endDate,
         endTime,
+        kmOption: bikeDetails.isUnlimited ? "unlimited" : "limited",
       });
-      extraAmount = pricing || 0;
     } catch (err) {
-      console.warn("calculateExtraAmount error:", err.message);
-      extraAmount = 0;
+      throw new ApiError(`Pricing calculation error: ${err.message}`, 400);
+    }
+
+    // Validate that the frontend pricing matches server calculation (with tolerance for helmet charges)
+    const expectedBaseTotal = serverPricing.breakdown.total;
+    const frontendBaseTotal = priceDetails.totalAmount - (priceDetails.helmetCharges || 0);
+    
+    if (Math.abs(expectedBaseTotal - frontendBaseTotal) > 1) {
+      console.log("Pricing mismatch:", {
+        serverCalculated: expectedBaseTotal,
+        frontendSent: frontendBaseTotal,
+        difference: Math.abs(expectedBaseTotal - frontendBaseTotal)
+      });
+      throw new ApiError("Pricing mismatch detected. Please refresh and try again.", 400);
     }
 
     // Update bike availability
@@ -193,7 +214,7 @@ export const createBooking = asyncHandler(async (req, res) => {
     }
     await bike.save();
 
-    // Create booking with helmet details
+    // Create booking using the validated pricing details from frontend
     const booking = await Booking.create({
       user: req.user._id,
       bookingType: "bike",
@@ -207,15 +228,15 @@ export const createBooking = asyncHandler(async (req, res) => {
       numberOfPeople: undefined,
       priceDetails: {
         ...priceDetails,
-        extraAmount,
-        helmetCharges, // ADD THIS
-        totalAmount:
-          (priceDetails.totalAmount || 0) + extraAmount + helmetCharges,
+        // Use the pricing details sent from frontend after server-side validation
+        extraAmount: priceDetails.extraCharges || 0,
+        // Include GST percentage from server pricing calculation or frontend
+        gstPercentage: priceDetails.gstPercentage || serverPricing.breakdown.gstPercentage || 5,
       },
       bikeDetails: {
         ...bikeDetails,
         helmetQuantity: requestedHelmets,
-        helmetCharges,
+        helmetCharges: priceDetails.helmetCharges || 0,
       },
       hotelDetails: undefined,
       couponCode,
@@ -226,6 +247,7 @@ export const createBooking = asyncHandler(async (req, res) => {
 
     // Send confirmation email & SMS
     const user = await User.findById(req.user._id).select("name email mobile");
+    const gstPercentage = priceDetails.gstPercentage || serverPricing.breakdown.gstPercentage || 5;
     const emailMessage = `
       <h1>Bike Booking Confirmation</h1>
       <p>Dear ${user.name},</p>
@@ -236,13 +258,10 @@ export const createBooking = asyncHandler(async (req, res) => {
       ).toLocaleString()}</p>
       <p>End: ${new Date(endDate + "T" + endTime + ":00").toLocaleString()}</p>
       <p>Helmets: ${requestedHelmets}</p>
-      <p>Helmet Charges: ₹${helmetCharges.toFixed(2)}</p>
-      <p>Extra Charges: ₹${extraAmount.toFixed(2)}</p>
-      <p>Total Amount: ₹${(
-        (priceDetails.totalAmount || 0) +
-        extraAmount +
-        helmetCharges
-      ).toFixed(2)}</p>
+      <p>Helmet Charges: ₹${(priceDetails.helmetCharges || 0).toFixed(2)}</p>
+      <p>Extra Charges: ₹${(priceDetails.extraCharges || 0).toFixed(2)}</p>
+      <p>GST (${gstPercentage}%): ₹${(priceDetails.taxes || 0).toFixed(2)}</p>
+      <p>Total Amount: ₹${priceDetails.totalAmount.toFixed(2)}</p>
       <p>Thank you for choosing HappyGo!</p>
     `;
 

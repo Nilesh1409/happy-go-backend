@@ -68,6 +68,10 @@ const bookingSchema = new mongoose.Schema(
         type: Number,
         required: [true, "Please add taxes"],
       },
+      gstPercentage: {
+        type: Number,
+        default: 5,
+      },
       discount: {
         type: Number,
         default: 0,
