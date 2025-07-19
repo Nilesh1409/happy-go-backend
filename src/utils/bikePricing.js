@@ -91,13 +91,15 @@ export function calculateRentalPricing({
 
   const extraCharges = calculateTimeBasedCharges(startTime, endTime);
   const subtotal = basePrice + extraCharges;
-  const gst = subtotal * 0.05; // 5% GST
+  const gstPercentage = 5; // 5% GST
+  const gst = subtotal * (gstPercentage / 100);
   const total = subtotal + gst;
 
   breakdown.basePrice = basePrice;
   breakdown.extraCharges = extraCharges;
   breakdown.subtotal = subtotal;
   breakdown.gst = Math.round(gst * 100) / 100; // Round to 2 decimal places
+  breakdown.gstPercentage = gstPercentage; // Include GST percentage
   breakdown.total = Math.round(total * 100) / 100; // Round to 2 decimal places
 
   return {

@@ -23,6 +23,7 @@ import placeRoutes from "./routes/place.routes.js";
 import orderRoutes from "./routes/order.routes.js";
 import uploadRoutes from "./routes/upload.routes.js";
 import simpleUploadRoutes from "./routes/simpleUpload.routes.js";
+import fileUploadRoutes from "./routes/fileUpload.routes.js";
 import aadhaarRoutes from "./routes/aadhaar.routes.js";
 
 // Middleware
@@ -68,7 +69,8 @@ app.use("/api/payments", paymentRoutes);
 app.use("/api/places", placeRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/upload", uploadRoutes);
-app.use("/api/simple-upload", simpleUploadRoutes);
+// app.use("/api/simple-upload", simpleUploadRoutes);
+app.use("/api/file-upload", fileUploadRoutes);
 app.use("/api/verification/aadhaar", aadhaarRoutes);
 
 // Error handling
