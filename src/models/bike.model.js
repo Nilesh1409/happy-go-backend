@@ -31,29 +31,38 @@ const bikeSchema = new mongoose.Schema(
       },
     ],
     pricePerDay: {
-      limitedKm: {
-        price: {
-          type: Number,
-          required: [true, "Please add a price for limited km"],
+      weekday: {
+        limited: {
+          price: {
+            type: Number,
+            required: [true, "Please add a weekday price for limited km"],
+          },
+          kmLimit: { type: Number, default: 60 },
+          isActive: { type: Boolean, default: true },
         },
-        kmLimit: {
-          type: Number,
-          required: [true, "Please add a km limit"],
-          default: 60,
-        },
-        isActive: {
-          type: Boolean,
-          default: true,
+        unlimited: {
+          price: {
+            type: Number,
+            required: [true, "Please add a weekday price for unlimited km"],
+          },
+          isActive: { type: Boolean, default: true },
         },
       },
-      unlimited: {
-        price: {
-          type: Number,
-          required: [true, "Please add a price for unlimited km"],
+      weekend: {
+        limited: {
+          price: {
+            type: Number,
+            required: [true, "Please add a weekend price for limited km"],
+          },
+          kmLimit: { type: Number, default: 60 },
+          isActive: { type: Boolean, default: true },
         },
-        isActive: {
-          type: Boolean,
-          default: true,
+        unlimited: {
+          price: {
+            type: Number,
+            required: [true, "Please add a weekend price for unlimited km"],
+          },
+          isActive: { type: Boolean, default: true },
         },
       },
     },

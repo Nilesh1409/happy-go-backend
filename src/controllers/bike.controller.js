@@ -203,10 +203,10 @@ export const getTrendingBikes = asyncHandler(async (req, res) => {
   const startRequested = new Date(`${startDate}T${startTime}:00`);
   const endRequested = new Date(`${endDate}T${endTime}:00`);
 
-  // Helper function to check if it's weekend (Friday=5, Saturday=6, Sunday=0, Monday=1)
+  // Helper function to check if it's weekend (Saturday=6, Sunday=0)
   const isWeekend = (date) => {
     const day = date.getDay();
-    return day === 0 || day === 1 || day === 5 || day === 6; // Sunday, Monday, Friday, Saturday
+    return day === 0 || day === 6; // Sunday, Saturday
   };
 
   // Check if the booking period includes any weekend days
@@ -236,49 +236,50 @@ export const getTrendingBikes = asyncHandler(async (req, res) => {
     endDate: { $gte: startDateOnly },
   });
 
-  // Group bookings by bike and filter for true date+time overlap
-  const bookingsByBike = rawBookings.reduce((map, bk) => {
-    const bStart = new Date(bk.startDate);
-    const [sh, sm] = bk.startTime.split(":").map(Number);
+  // Group bookings by bike and sum quantities for true date+time overlap
+  const bookingsByBike = rawBookings.reduce((map, booking) => {
+    const bStart = new Date(booking.startDate);
+    const [sh, sm] = booking.startTime.split(":").map(Number);
     bStart.setHours(sh, sm, 0, 0);
 
-    const bEnd = new Date(bk.endDate);
-    const [eh, em] = bk.endTime.split(":").map(Number);
+    const bEnd = new Date(booking.endDate);
+    const [eh, em] = booking.endTime.split(":").map(Number);
     bEnd.setHours(eh, em, 0, 0);
 
     // Inclusive overlap check
     if (bStart <= endRequested && bEnd >= startRequested) {
-      const id = bk.bike.toString();
-      map[id] = map[id] || [];
-      map[id].push({ start: bStart, end: bEnd });
+      if (booking.bikes && booking.bikes.length > 0) {
+        booking.bikes.forEach((b) => {
+          const id = b.bike.toString();
+          map[id] = (map[id] || 0) + b.quantity;
+        });
+      }
     }
     return map;
   }, {});
 
   // Process each trending bike with pricing and availability
-  const result = bikes.map((bike) => {
+  const resultPromises = bikes.map(async (bike) => {
     const id = bike._id.toString();
     const total = bike.quantity;
-    const overlappingBookings = bookingsByBike[id] || [];
-    const count = overlappingBookings.length;
+    const bookedCount = bookingsByBike[id] || 0;
 
-    // Create a modified bike object with weekend pricing logic
+    // Create a modified bike object
     const bikeObject = bike.toObject();
-
-    // Modify limitedKm.isActive based on weekend check
-    if (bookingIncludesWeekend) {
-      bikeObject.pricePerDay.limitedKm.isActive = false;
-    }
 
     // Calculate pricing for both limited and unlimited options
     let priceLimited = null;
     let priceUnlimited = null;
 
     try {
-      // Calculate limited km pricing (if active and not weekend)
-      if (bikeObject.pricePerDay?.limitedKm?.isActive) {
+      // Calculate limited km pricing
+      if (
+        (bookingIncludesWeekend
+          ? bikeObject.pricePerDay?.weekend?.limited?.isActive
+          : bikeObject.pricePerDay?.weekday?.limited?.isActive)
+      ) {
         try {
-          const limitedPricing = calculateRentalPricing({
+          const limitedPricing = await calculateRentalPricing({
             bike: bikeObject,
             startDate,
             startTime,
@@ -292,15 +293,22 @@ export const getTrendingBikes = asyncHandler(async (req, res) => {
             isWeekendBooking: limitedPricing.isWeekendBooking,
           };
         } catch (err) {
-          console.log(`Limited pricing calculation failed for trending bike ${bike._id}:`, err.message);
+          console.log(
+            `Limited pricing calculation failed for trending bike ${bike._id}:`,
+            err.message
+          );
           priceLimited = null;
         }
       }
 
-      // Calculate unlimited km pricing (if active)
-      if (bikeObject.pricePerDay?.unlimited?.isActive) {
+      // Calculate unlimited km pricing
+      if (
+        bookingIncludesWeekend
+          ? bikeObject.pricePerDay?.weekend?.unlimited?.isActive
+          : bikeObject.pricePerDay?.weekday?.unlimited?.isActive
+      ) {
         try {
-          const unlimitedPricing = calculateRentalPricing({
+          const unlimitedPricing = await calculateRentalPricing({
             bike: bikeObject,
             startDate,
             startTime,
@@ -314,18 +322,24 @@ export const getTrendingBikes = asyncHandler(async (req, res) => {
             isWeekendBooking: unlimitedPricing.isWeekendBooking,
           };
         } catch (err) {
-          console.log(`Unlimited pricing calculation failed for trending bike ${bike._id}:`, err.message);
+          console.log(
+            `Unlimited pricing calculation failed for trending bike ${bike._id}:`,
+            err.message
+          );
           priceUnlimited = null;
         }
       }
     } catch (error) {
-      console.log(`Pricing calculation error for trending bike ${bike._id}:`, error.message);
+      console.log(
+        `Pricing calculation error for trending bike ${bike._id}:`,
+        error.message
+      );
     }
 
     return {
       ...bikeObject,
-      isAvailable: count < total,
-      availableUnits: Math.max(0, total - count),
+      isAvailable: bookedCount < total,
+      availableUnits: Math.max(0, total - bookedCount),
       // Add pricing calculations
       priceLimited,
       priceUnlimited,
@@ -337,6 +351,8 @@ export const getTrendingBikes = asyncHandler(async (req, res) => {
       },
     };
   });
+
+  const result = await Promise.all(resultPromises);
 
   // Apply price filtering if minPrice or maxPrice is provided
   let filteredResult = result;
@@ -432,10 +448,10 @@ export const getAvailableBikes = asyncHandler(async (req, res) => {
     throw new ApiError("Start date/time must be before end date/time", 400);
   }
 
-  // Helper function to check if it's weekend (Friday=5, Saturday=6, Sunday=0, Monday=1)
+  // Helper function to check if it's weekend (Saturday=6, Sunday=0)
   const isWeekend = (date) => {
     const day = date.getDay();
-    return day === 0 || day === 1 || day === 5 || day === 6; // Sunday, Monday, Friday, Saturday
+    return day === 0 || day === 6; // Sunday, Saturday
   };
 
   // Check if the booking period includes any weekend days
@@ -472,49 +488,50 @@ export const getAvailableBikes = asyncHandler(async (req, res) => {
     endDate: { $gte: startDateOnly },
   });
 
-  // 5. Group bookings by bike and filter for true date+time overlap
-  const bookingsByBike = rawBookings.reduce((map, bk) => {
-    const bStart = new Date(bk.startDate);
-    const [sh, sm] = bk.startTime.split(":").map(Number);
+  // 5. Group bookings by bike and sum quantities for true date+time overlap
+  const bookingsByBike = rawBookings.reduce((map, booking) => {
+    const bStart = new Date(booking.startDate);
+    const [sh, sm] = booking.startTime.split(":").map(Number);
     bStart.setHours(sh, sm, 0, 0);
 
-    const bEnd = new Date(bk.endDate);
-    const [eh, em] = bk.endTime.split(":").map(Number);
+    const bEnd = new Date(booking.endDate);
+    const [eh, em] = booking.endTime.split(":").map(Number);
     bEnd.setHours(eh, em, 0, 0);
 
     // Inclusive overlap check
     if (bStart <= endRequested && bEnd >= startRequested) {
-      const id = bk.bike.toString();
-      map[id] = map[id] || [];
-      map[id].push({ start: bStart, end: bEnd });
+      if (booking.bikes && booking.bikes.length > 0) {
+        booking.bikes.forEach((b) => {
+          const id = b.bike.toString();
+          map[id] = (map[id] || 0) + b.quantity;
+        });
+      }
     }
     return map;
   }, {});
 
   // 6. Process each bike and determine availability with pricing
-  const result = bikes.map((bike) => {
+  const resultPromises = bikes.map(async (bike) => {
     const id = bike._id.toString();
     const total = bike.quantity;
-    const overlappingBookings = bookingsByBike[id] || [];
-    const count = overlappingBookings.length;
+    const bookedCount = bookingsByBike[id] || 0;
 
-    // Create a modified bike object with weekend pricing logic
+    // Create a modified bike object
     const bikeObject = bike.toObject();
-
-    // Modify limitedKm.isActive based on weekend check
-    if (bookingIncludesWeekend) {
-      bikeObject.pricePerDay.limitedKm.isActive = false;
-    }
 
     // Calculate pricing for both limited and unlimited options
     let priceLimited = null;
     let priceUnlimited = null;
 
     try {
-      // Calculate limited km pricing (if active and not weekend)
-      if (bikeObject.pricePerDay?.limitedKm?.isActive) {
+      // Calculate limited km pricing
+      if (
+        (bookingIncludesWeekend
+          ? bikeObject.pricePerDay?.weekend?.limited?.isActive
+          : bikeObject.pricePerDay?.weekday?.limited?.isActive)
+      ) {
         try {
-          const limitedPricing = calculateRentalPricing({
+          const limitedPricing = await calculateRentalPricing({
             bike: bikeObject,
             startDate,
             startTime,
@@ -528,15 +545,22 @@ export const getAvailableBikes = asyncHandler(async (req, res) => {
             isWeekendBooking: limitedPricing.isWeekendBooking,
           };
         } catch (err) {
-          console.log(`Limited pricing calculation failed for bike ${bike._id}:`, err.message);
+          console.log(
+            `Limited pricing calculation failed for bike ${bike._id}:`,
+            err.message
+          );
           priceLimited = null;
         }
       }
 
-      // Calculate unlimited km pricing (if active)
-      if (bikeObject.pricePerDay?.unlimited?.isActive) {
+      // Calculate unlimited km pricing
+      if (
+        bookingIncludesWeekend
+          ? bikeObject.pricePerDay?.weekend?.unlimited?.isActive
+          : bikeObject.pricePerDay?.weekday?.unlimited?.isActive
+      ) {
         try {
-          const unlimitedPricing = calculateRentalPricing({
+          const unlimitedPricing = await calculateRentalPricing({
             bike: bikeObject,
             startDate,
             startTime,
@@ -550,15 +574,21 @@ export const getAvailableBikes = asyncHandler(async (req, res) => {
             isWeekendBooking: unlimitedPricing.isWeekendBooking,
           };
         } catch (err) {
-          console.log(`Unlimited pricing calculation failed for bike ${bike._id}:`, err.message);
+          console.log(
+            `Unlimited pricing calculation failed for bike ${bike._id}:`,
+            err.message
+          );
           priceUnlimited = null;
         }
       }
     } catch (error) {
-      console.log(`Pricing calculation error for bike ${bike._id}:`, error.message);
+      console.log(
+        `Pricing calculation error for bike ${bike._id}:`,
+        error.message
+      );
     }
 
-    if (count < total) {
+    if (bookedCount < total) {
       // Bike is available
       let extraAmount = 0;
 
@@ -577,7 +607,7 @@ export const getAvailableBikes = asyncHandler(async (req, res) => {
       return {
         ...bikeObject,
         isAvailable: true,
-        availableUnits: total - count,
+        availableUnits: total - bookedCount,
         extraAmount: extraAmount,
         // Add pricing calculations
         priceLimited,
@@ -590,19 +620,12 @@ export const getAvailableBikes = asyncHandler(async (req, res) => {
         },
       };
     } else {
-      // Bike is unavailable, calculate next available time
-      const endTimes = overlappingBookings.map((b) => b.end.getTime());
-      const nextAvailableTime =
-        endTimes.length > 0 ? Math.min(...endTimes) : null;
-      const nextAvailable = nextAvailableTime
-        ? new Date(nextAvailableTime).toISOString()
-        : null;
-
+      // Bike is unavailable
       return {
         ...bikeObject,
         isAvailable: false,
         availableUnits: 0,
-        nextAvailable,
+        nextAvailable: null, // nextAvailable logic removed for simplicity with new booking model
         // Add pricing calculations even for unavailable bikes
         priceLimited,
         priceUnlimited,
@@ -615,6 +638,8 @@ export const getAvailableBikes = asyncHandler(async (req, res) => {
       };
     }
   });
+
+  const result = await Promise.all(resultPromises);
 
   // console.log("Available bikes with pricing:", result.length);
 
@@ -632,25 +657,21 @@ export const createBike = asyncHandler(async (req, res) => {
   // Handle image uploads to S3 if they are base64 strings
   const { images, ...bikeData } = req.body;
 
-  // Validate pricing options - at least one must be active
+  // Validate the new pricing structure
+  const { pricePerDay } = bikeData;
   if (
-    (!bikeData.pricePerDay?.limitedKm?.isActive &&
-      !bikeData.pricePerDay?.unlimited?.isActive) ||
-    (bikeData.pricePerDay?.limitedKm?.isActive === false &&
-      bikeData.pricePerDay?.unlimited?.isActive === false)
+    !pricePerDay ||
+    !pricePerDay.weekday ||
+    !pricePerDay.weekend ||
+    !pricePerDay.weekday.limited ||
+    !pricePerDay.weekday.unlimited ||
+    !pricePerDay.weekend.limited ||
+    !pricePerDay.weekend.unlimited
   ) {
     throw new ApiError(
-      "At least one pricing option (limited or unlimited) must be active",
+      "Please provide a complete pricing structure (weekday/weekend, limited/unlimited)",
       400
     );
-  }
-
-  // Set default kmLimit to 60 if not provided
-  if (
-    bikeData.pricePerDay?.limitedKm &&
-    !bikeData.pricePerDay.limitedKm.kmLimit
-  ) {
-    bikeData.pricePerDay.limitedKm.kmLimit = 60;
   }
 
   let uploadedImages = [];
@@ -801,7 +822,7 @@ export const getBike = asyncHandler(async (req, res) => {
 
   if (startDate && startTime && endDate && endTime) {
     try {
-      pricing = calculateRentalPricing({
+      pricing = await calculateRentalPricing({
         bike,
         startDate,
         startTime,
@@ -884,27 +905,22 @@ export const updateBike = asyncHandler(async (req, res) => {
 
   const { images, quantity, availableQuantity, ...bikeData } = req.body;
 
-  // Validate pricing options - at least one must be active
-  if (
-    bikeData.pricePerDay &&
-    bikeData.pricePerDay.limitedKm &&
-    bikeData.pricePerDay.unlimited &&
-    bikeData.pricePerDay.limitedKm.isActive === false &&
-    bikeData.pricePerDay.unlimited.isActive === false
-  ) {
-    throw new ApiError(
-      "At least one pricing option (limited or unlimited) must be active",
-      400
-    );
-  }
-
-  // Set default kmLimit to 60 if not provided but limitedKm is active
-  if (
-    bikeData.pricePerDay?.limitedKm?.isActive &&
-    (!bikeData.pricePerDay.limitedKm.kmLimit ||
-      bikeData.pricePerDay.limitedKm.kmLimit <= 0)
-  ) {
-    bikeData.pricePerDay.limitedKm.kmLimit = 60;
+  // If pricePerDay is being updated, validate the new structure
+  if (bikeData.pricePerDay) {
+    const { weekday, weekend } = bikeData.pricePerDay;
+    if (
+      !weekday ||
+      !weekend ||
+      !weekday.limited ||
+      !weekday.unlimited ||
+      !weekend.limited ||
+      !weekend.unlimited
+    ) {
+      throw new ApiError(
+        "Please provide a complete pricing structure (weekday/weekend, limited/unlimited)",
+        400
+      );
+    }
   }
 
   // Handle image uploads if provided

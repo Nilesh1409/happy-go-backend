@@ -1,3 +1,6 @@
+import SpecialPricePeriod from "../models/specialPricePeriod.model.js";
+import Booking from "../models/booking.model.js";
+
 export function calculateExtraAmount({
   bike,
   startTime,
@@ -24,7 +27,7 @@ export function calculateExtraAmount({
   return earlyPickupFee + lateDropFee;
 }
 
-export function calculateRentalPricing({
+export async function calculateRentalPricing({
   bike,
   startDate,
   startTime,
@@ -35,78 +38,103 @@ export function calculateRentalPricing({
   const start = new Date(`${startDate}T${startTime}`);
   const end = new Date(`${endDate}T${endTime}`);
 
-  const isWeekendBooking = hasWeekendInRange(start, end);
+  if (isNaN(start) || isNaN(end) || start >= end) {
+    throw new Error("Invalid date range");
+  }
+
+  // 1. Determine booking duration
   const totalHours = (end - start) / (1000 * 60 * 60);
   const totalDays = Math.ceil(totalHours / 24);
 
-  let basePrice = 0;
-  let breakdown = {
-    type: "",
-    duration: "",
-    basePrice: 0,
-    extraCharges: 0,
-    subtotal: 0,
-    gst: 0,
-    total: 0,
-  };
+  // 2. Check for special pricing periods
+  const specialPricePeriod = await SpecialPricePeriod.findOne({
+    isActive: true,
+    startDate: { $lte: end },
+    endDate: { $gte: start },
+  });
+  const priceMultiplier = specialPricePeriod
+    ? specialPricePeriod.priceMultiplier
+    : 1;
 
-  if (isWeekendBooking) {
-    basePrice = bike.pricePerDay.unlimited.price * totalDays;
-    breakdown.type = "weekend";
-    breakdown.duration = `${totalDays} day(s)`;
-    kmOption = "unlimited";
+  // 3. Determine surge pricing based on demand
+  const totalBookingsForDay = await Booking.countDocuments({
+    bookingType: "bike",
+    bookingStatus: { $in: ["confirmed", "pending"] },
+    startDate: { $lte: end },
+    endDate: { $gte: start },
+  });
 
-    if (!bike.pricePerDay.unlimited.isActive) {
-      throw new Error("Weekend bookings require unlimited km option");
-    }
-  } else {
-    if (totalHours <= 5) {
-      const fullPrice =
-        kmOption === "unlimited"
-          ? bike.pricePerDay.unlimited.price
-          : bike.pricePerDay.limitedKm.price;
-
-      basePrice = fullPrice * 0.5;
-      breakdown.type = "weekday_short";
-      breakdown.duration = `${totalHours.toFixed(1)} hours`;
-    } else {
-      basePrice =
-        kmOption === "unlimited"
-          ? bike.pricePerDay.unlimited.price * totalDays
-          : bike.pricePerDay.limitedKm.price * totalDays;
-
-      breakdown.type = "weekday_full";
-      breakdown.duration = `${totalDays} day(s)`;
-    }
-
-    const selectedOption =
-      kmOption === "unlimited"
-        ? bike.pricePerDay.unlimited
-        : bike.pricePerDay.limitedKm;
-
-    if (!selectedOption.isActive) {
-      throw new Error(`${kmOption} km option not available`);
-    }
+  let surgeMultiplier = 1;
+  if (totalBookingsForDay >= 5 && totalBookingsForDay <= 10) {
+    surgeMultiplier = 1.05; // 5% increase
+  } else if (totalBookingsForDay > 10) {
+    surgeMultiplier = 1.1; // 10% increase
   }
 
+  // 4. Determine if it's a weekend booking or special date
+  const isWeekendOrSpecial =
+    hasWeekendInRange(start, end) || !!specialPricePeriod;
+
+  // 5. Select the correct base price
+  let priceTier;
+  if (isWeekendOrSpecial) {
+    priceTier = bike.pricePerDay.weekend[kmOption];
+  } else {
+    priceTier = bike.pricePerDay.weekday[kmOption];
+  }
+
+  if (!priceTier || !priceTier.isActive) {
+    throw new Error(
+      `The selected pricing option (${
+        isWeekendOrSpecial ? "weekend" : "weekday"
+      } ${kmOption}) is not available for this bike.`
+    );
+  }
+
+  let basePricePerDay = priceTier.price;
+
+  // 6. Calculate base price
+  let basePrice;
+  // Short rental discount only applies on weekdays
+  if (!isWeekendOrSpecial && totalHours > 0 && totalHours <= 5) {
+    basePrice = basePricePerDay * 0.5;
+  } else {
+    basePrice = basePricePerDay * totalDays;
+  }
+
+  // 7. Apply multipliers
+  const finalBasePrice = basePrice * priceMultiplier * surgeMultiplier;
+
+  // 8. Calculate extra charges for non-standard hours
   const extraCharges = calculateTimeBasedCharges(startTime, endTime);
-  const subtotal = basePrice + extraCharges;
+
+  // 9. Calculate total and GST
+  const subtotal = finalBasePrice + extraCharges;
   const gstPercentage = 5; // 5% GST
   const gst = subtotal * (gstPercentage / 100);
   const total = subtotal + gst;
 
-  breakdown.basePrice = basePrice;
-  breakdown.extraCharges = extraCharges;
-  breakdown.subtotal = subtotal;
-  breakdown.gst = Math.round(gst * 100) / 100; // Round to 2 decimal places
-  breakdown.gstPercentage = gstPercentage; // Include GST percentage
-  breakdown.total = Math.round(total * 100) / 100; // Round to 2 decimal places
+  // 10. Construct breakdown
+  const breakdown = {
+    type: isWeekendOrSpecial ? "weekend/special" : "weekday",
+    kmOption,
+    duration: `${totalDays} day(s)`,
+    basePrice: Math.round(basePrice * 100) / 100,
+    specialDateMultiplier: priceMultiplier,
+    surgeMultiplier: surgeMultiplier,
+    finalBasePrice: Math.round(finalBasePrice * 100) / 100,
+    extraCharges,
+    subtotal: Math.round(subtotal * 100) / 100,
+    gst: Math.round(gst * 100) / 100,
+    gstPercentage,
+    total: Math.round(total * 100) / 100,
+  };
 
   return {
     totalPrice: breakdown.total,
     breakdown,
     kmOption,
-    isWeekendBooking,
+    isWeekendBooking: isWeekendOrSpecial,
   };
 }
 
@@ -118,12 +146,8 @@ function hasWeekendInRange(start, end) {
   while (current <= endDate) {
     const dayOfWeek = current.getDay();
 
-    if (
-      dayOfWeek === 5 ||
-      dayOfWeek === 6 ||
-      dayOfWeek === 0 ||
-      dayOfWeek === 1
-    ) {
+    if (dayOfWeek === 6 || dayOfWeek === 0) {
+      // Saturday or Sunday
       return true;
     }
 

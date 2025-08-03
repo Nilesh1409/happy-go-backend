@@ -12,9 +12,35 @@ const bookingSchema = new mongoose.Schema(
       required: [true, "Please add a booking type"],
       enum: ["bike", "hotel"],
     },
-    bike: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Bike",
+    bikes: {
+      type: [
+        {
+          bike: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "Bike",
+            required: true,
+          },
+          quantity: {
+            type: Number,
+            required: true,
+            min: 1,
+          },
+          kmOption: {
+            type: String,
+            enum: ["limited", "unlimited"],
+            required: true,
+          },
+          // details for each bike booking
+          kmLimit: { type: mongoose.Schema.Types.Mixed },
+          additionalKmPrice: { type: Number },
+          initialKmReading: { type: Number },
+          finalKmReading: { type: Number },
+          additionalCharges: {
+            amount: { type: Number, default: 0 },
+            reason: { type: String },
+          },
+        },
+      ],
       required: function () {
         return this.bookingType === "bike";
       },
@@ -106,59 +132,20 @@ const bookingSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Employee",
     },
-    bikeDetails: {
-      kmLimit: {
-        type: mongoose.Schema.Types.Mixed,
-        required: function () {
-          return this.bookingType === "bike";
-        },
+    helmetQuantity: {
+      type: Number,
+      default: 0,
+      min: [0, "Helmet quantity cannot be negative"],
+    },
+    documentsSubmitted: {
+      idProof: {
+        type: String,
       },
-      isUnlimited: {
-        type: Boolean,
-        required: function () {
-          return this.bookingType === "bike";
-        },
+      drivingLicense: {
+        type: String,
       },
-      additionalKmPrice: {
-        type: Number,
-        required: function () {
-          return this.bookingType === "bike";
-        },
-      },
-      helmetQuantity: {
-        type: Number,
-        default: 0,
-        min: [0, "Helmet quantity cannot be negative"],
-      },
-      helmetCharges: {
-        type: Number,
-        default: 0,
-      },
-      documentsSubmitted: {
-        idProof: {
-          type: String,
-        },
-        drivingLicense: {
-          type: String,
-        },
-        addressProof: {
-          type: String,
-        },
-      },
-      finalKmReading: {
-        type: Number,
-      },
-      initialKmReading: {
-        type: Number,
-      },
-      additionalCharges: {
-        amount: {
-          type: Number,
-          default: 0,
-        },
-        reason: {
-          type: String,
-        },
+      addressProof: {
+        type: String,
       },
     },
     hotelDetails: {

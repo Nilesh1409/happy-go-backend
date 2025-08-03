@@ -6,6 +6,7 @@ import Bike from "../models/bike.model.js";
 import Hotel from "../models/hotel.model.js";
 import Product from "../models/product.model.js";
 import Referral from "../models/referral.model.js";
+import SpecialPricePeriod from "../models/specialPricePeriod.model.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 
@@ -635,5 +636,85 @@ export const getAdminReferrals = asyncHandler(async (req, res) => {
     page: Number.parseInt(page),
     pages: Math.ceil(total / Number.parseInt(limit)),
     data: referrals,
+  });
+});
+
+// @desc    Create a special price period
+// @route   POST /api/admin/special-price-periods
+// @access  Private/Admin
+export const createSpecialPricePeriod = asyncHandler(async (req, res) => {
+  const { name, startDate, endDate, priceMultiplier, isActive } = req.body;
+
+  if (!name || !startDate || !endDate || !priceMultiplier) {
+    throw new ApiError("Please provide all required fields", 400);
+  }
+
+  const specialPricePeriod = await SpecialPricePeriod.create({
+    name,
+    startDate,
+    endDate,
+    priceMultiplier,
+    isActive,
+  });
+
+  res.status(201).json({
+    success: true,
+    data: specialPricePeriod,
+  });
+});
+
+// @desc    Get all special price periods
+// @route   GET /api/admin/special-price-periods
+// @access  Private/Admin
+export const getSpecialPricePeriods = asyncHandler(async (req, res) => {
+  const specialPricePeriods = await SpecialPricePeriod.find({});
+
+  res.status(200).json({
+    success: true,
+    count: specialPricePeriods.length,
+    data: specialPricePeriods,
+  });
+});
+
+// @desc    Update a special price period
+// @route   PUT /api/admin/special-price-periods/:id
+// @access  Private/Admin
+export const updateSpecialPricePeriod = asyncHandler(async (req, res) => {
+  let specialPricePeriod = await SpecialPricePeriod.findById(req.params.id);
+
+  if (!specialPricePeriod) {
+    throw new ApiError("Special price period not found", 404);
+  }
+
+  specialPricePeriod = await SpecialPricePeriod.findByIdAndUpdate(
+    req.params.id,
+    req.body,
+    {
+      new: true,
+      runValidators: true,
+    }
+  );
+
+  res.status(200).json({
+    success: true,
+    data: specialPricePeriod,
+  });
+});
+
+// @desc    Delete a special price period
+// @route   DELETE /api/admin/special-price-periods/:id
+// @access  Private/Admin
+export const deleteSpecialPricePeriod = asyncHandler(async (req, res) => {
+  const specialPricePeriod = await SpecialPricePeriod.findById(req.params.id);
+
+  if (!specialPricePeriod) {
+    throw new ApiError("Special price period not found", 404);
+  }
+
+  await specialPricePeriod.deleteOne();
+
+  res.status(200).json({
+    success: true,
+    data: {},
   });
 });

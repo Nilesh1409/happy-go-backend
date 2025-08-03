@@ -11,6 +11,10 @@ import {
   getAdminBookings,
   getAdminOrders,
   getAdminReferrals,
+  createSpecialPricePeriod,
+  getSpecialPricePeriods,
+  updateSpecialPricePeriod,
+  deleteSpecialPricePeriod,
 } from "../controllers/admin.controller.js"
 import { adminProtect } from "../middleware/auth.middleware.js"
 
@@ -27,6 +31,24 @@ router.put("/orders/:id/assign", adminProtect, assignOrderToEmployee)
 router.get("/bookings", adminProtect, getAdminBookings)
 router.get("/orders", adminProtect, getAdminOrders)
 router.get("/referrals", adminProtect, getAdminReferrals)
+
+// Special Price Period Routes
+router.post(
+  "/special-price-periods",
+  adminProtect,
+  createSpecialPricePeriod
+)
+router.get("/special-price-periods", adminProtect, getSpecialPricePeriods)
+router.put(
+  "/special-price-periods/:id",
+  adminProtect,
+  updateSpecialPricePeriod
+)
+router.delete(
+  "/special-price-periods/:id",
+  adminProtect,
+  deleteSpecialPricePeriod
+)
 
 export default router
 
