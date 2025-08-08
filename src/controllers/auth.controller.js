@@ -456,12 +456,30 @@ export const loginUser = asyncHandler(async (req, res) => {
     </div>
   `;
 
-    let userData = entityType === "user" ? foundUser : foundEmployee;
+  let userData = entityType === "user" ? foundUser : foundEmployee;
+    
+  console.log("📧 Email sending attempt:");
+  console.log("Entity type:", entityType);
+  console.log("User email:", userData.email);
+  console.log("Email exists:", !!userData.email);
+
+  if (!userData.email) {
+    console.error("❌ No email found for", entityType);
+    throw new ApiError(`No email address found for this ${entityType}`, 400);
+  }
+
+  try {
+    console.log("📧 Sending email to:", userData.email);
     await sendEmail({
       email: userData.email,
       subject: "Email Verification",
       message,
     });
+    console.log("✅ Email sent successfully to:", userData.email);
+  } catch (emailError) {
+    console.error("❌ Email sending failed:", emailError);
+    throw new ApiError("Failed to send OTP email", 500);
+  }
 
     console.log("🚀 ~ sendMobileOTP ~ otp:", otp);
 

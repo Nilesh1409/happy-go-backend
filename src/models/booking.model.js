@@ -1,4 +1,69 @@
-import mongoose from "mongoose";
+import mongoose from "mongoose"
+
+const bookingItemSchema = new mongoose.Schema({
+  bike: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Bike",
+    required: true,
+  },
+  quantity: {
+    type: Number,
+    required: true,
+    min: 1,
+  },
+  kmOption: {
+    type: String,
+    enum: ["limited", "unlimited"],
+    required: true,
+  },
+  pricePerUnit: {
+    type: Number,
+    required: true,
+  },
+  totalPrice: {
+    type: Number,
+    required: true,
+  },
+  kmLimit: {
+    type: Number,
+  },
+  additionalKmPrice: {
+    type: Number,
+    required: true,
+  },
+  // Individual bike tracking for returns
+  bikeUnits: [
+    {
+      unitNumber: {
+        type: Number,
+        required: true,
+      },
+      initialKmReading: {
+        type: Number,
+      },
+      finalKmReading: {
+        type: Number,
+      },
+      additionalCharges: {
+        amount: {
+          type: Number,
+          default: 0,
+        },
+        reason: {
+          type: String,
+        },
+      },
+      status: {
+        type: String,
+        enum: ["pending", "picked", "returned"],
+        default: "pending",
+      },
+      returnedAt: {
+        type: Date,
+      },
+    },
+  ],
+})
 
 const bookingSchema = new mongoose.Schema(
   {
@@ -12,24 +77,27 @@ const bookingSchema = new mongoose.Schema(
       required: [true, "Please add a booking type"],
       enum: ["bike", "hotel"],
     },
+    // For bike bookings - supports both single bike and multiple bikes
     bike: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Bike",
       required: function () {
-        return this.bookingType === "bike";
+        return this.bookingType === "bike" && (!this.bikeItems || this.bikeItems.length === 0)
       },
     },
+    bikeItems: [bookingItemSchema],
+    // For hotel bookings (unchanged)
     hotel: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Hotel",
       required: function () {
-        return this.bookingType === "hotel";
+        return this.bookingType === "hotel"
       },
     },
     roomType: {
       type: String,
       required: function () {
-        return this.bookingType === "hotel";
+        return this.bookingType === "hotel"
       },
     },
     startDate: {
@@ -43,26 +111,56 @@ const bookingSchema = new mongoose.Schema(
     startTime: {
       type: String,
       required: function () {
-        return this.bookingType === "bike";
+        return this.bookingType === "bike"
       },
     },
     endTime: {
       type: String,
       required: function () {
-        return this.bookingType === "bike";
+        return this.bookingType === "bike"
       },
     },
     numberOfPeople: {
       type: Number,
       required: function () {
-        return this.bookingType === "hotel";
+        return this.bookingType === "hotel"
       },
       min: [1, "Number of people must be at least 1"],
     },
     priceDetails: {
       basePrice: {
         type: Number,
-        required: [true, "Please add a base price"],
+        required: true,
+      },
+      subtotal: {
+        type: Number,
+        required: true,
+      },
+      bulkDiscount: {
+        amount: {
+          type: Number,
+          default: 0,
+        },
+        percentage: {
+          type: Number,
+          default: 0,
+        },
+      },
+      surgeMultiplier: {
+        type: Number,
+        default: 1,
+      },
+      extraCharges: {
+        type: Number,
+        default: 0,
+      },
+      extraAmount: {
+        type: Number,
+        default: 0,
+      },
+      helmetCharges: {
+        type: Number,
+        default: 0,
       },
       taxes: {
         type: Number,
@@ -73,14 +171,6 @@ const bookingSchema = new mongoose.Schema(
         default: 5,
       },
       discount: {
-        type: Number,
-        default: 0,
-      },
-      helmetCharges: {
-        type: Number,
-        default: 0,
-      },
-      extraAmount: {
         type: Number,
         default: 0,
       },
@@ -99,57 +189,56 @@ const bookingSchema = new mongoose.Schema(
     },
     bookingStatus: {
       type: String,
-      enum: ["pending", "confirmed", "cancelled", "completed"],
+      enum: ["pending", "confirmed", "cancelled", "completed", "partial"],
       default: "pending",
     },
     assignedEmployee: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Employee",
     },
-    bikeDetails: {
-      kmLimit: {
-        type: mongoose.Schema.Types.Mixed,
-        required: function () {
-          return this.bookingType === "bike";
-        },
-      },
-      isUnlimited: {
-        type: Boolean,
-        required: function () {
-          return this.bookingType === "bike";
-        },
-      },
-      additionalKmPrice: {
-        type: Number,
-        required: function () {
-          return this.bookingType === "bike";
-        },
-      },
-      helmetQuantity: {
+    helmetDetails: {
+      quantity: {
         type: Number,
         default: 0,
         min: [0, "Helmet quantity cannot be negative"],
       },
-      helmetCharges: {
+      charges: {
         type: Number,
         default: 0,
       },
-      documentsSubmitted: {
-        idProof: {
-          type: String,
-        },
-        drivingLicense: {
-          type: String,
-        },
-        addressProof: {
-          type: String,
-        },
+    },
+    documentsSubmitted: {
+      idProof: {
+        type: String,
       },
-      finalKmReading: {
-        type: Number,
+      drivingLicense: {
+        type: String,
       },
-      initialKmReading: {
+      addressProof: {
+        type: String,
+      },
+    },
+    // Bike-specific details for single bike bookings
+    bikeDetails: {
+      kmLimit: {
+        type: String,
+        enum: ["Limited", "Unlimited"],
+      },
+      isUnlimited: {
+        type: Boolean,
+        default: false,
+      },
+      additionalKmPrice: {
         type: Number,
+        default: 0,
+      },
+      helmetQuantity: {
+        type: Number,
+        default: 0,
+      },
+      helmetCharges: {
+        type: Number,
+        default: 0,
       },
       additionalCharges: {
         amount: {
@@ -161,8 +250,8 @@ const bookingSchema = new mongoose.Schema(
         },
       },
     },
+    // Hotel details (unchanged)
     hotelDetails: {
-      // Modified to store quantities for each meal option
       roomOptions: {
         bedOnly: {
           quantity: {
@@ -288,16 +377,16 @@ const bookingSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-  }
-);
+  },
+)
 
 bookingSchema.index({
   bookingType: 1,
   bookingStatus: 1,
-  start: 1,
-  end: 1,
-});
+  startDate: 1,
+  endDate: 1,
+})
 
-const Booking = mongoose.model("Booking", bookingSchema);
+const Booking = mongoose.model("Booking", bookingSchema)
 
-export default Booking;
+export default Booking

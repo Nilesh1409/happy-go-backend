@@ -143,6 +143,48 @@ export const authorize = (...roles) => {
   };
 };
 
+export const employeeOrAdminProtect = asyncHandler(async (req, res, next) => {
+  let token;
+
+  // Check if token exists in headers
+  if (
+    req.headers.authorization &&
+    req.headers.authorization.startsWith("Bearer")
+  ) {
+    token = req.headers.authorization.split(" ")[1];
+  }
+
+  // Check if token exists
+  if (!token) {
+    return next(new ApiError("Not authorized to access this route", 401));
+  }
+
+  try {
+    // Verify token
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+    // First check if it's an admin
+    const admin = await User.findById(decoded.id).select("-password");
+    if (admin && admin.role === "admin") {
+      req.user = admin;
+      req.userType = "admin";
+      return next();
+    }
+
+    // If not admin, check if it's an employee
+    const employee = await Employee.findById(decoded.id).select("-password");
+    if (employee) {
+      req.employee = employee;
+      req.userType = "employee";
+      return next();
+    }
+
+    return next(new ApiError("Not authorized - must be employee or admin", 403));
+  } catch (error) {
+    return next(new ApiError("Not authorized to access this route", 401));
+  }
+});
+
 export const authorizeEmployee = (moduleType) => {
   return asyncHandler(async (req, res, next) => {
     // Check if employee has access to this module

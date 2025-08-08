@@ -18,25 +18,36 @@ const fileFilter = (req, file, cb) => {
   console.log("Processing file:", {
     originalname: file.originalname,
     mimetype: file.mimetype,
-    size: file.size
+    size: file.size,
   });
 
   // Allowed file types
   const allowedTypes = [
     // Images
-    "image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif",
-    // Documents  
-    "application/pdf", "application/msword",
+    "image/jpeg",
+    "image/jpg",
+    "image/png",
+    "image/webp",
+    "image/gif",
+    // Documents
+    "application/pdf",
+    "application/msword",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     // Videos
-    "video/mp4", "video/webm", "video/quicktime"
+    "video/mp4",
+    "video/webm",
+    "video/quicktime",
   ];
 
   if (allowedTypes.includes(file.mimetype)) {
     cb(null, true);
   } else {
-    const error = new Error(`Unsupported file type: ${file.mimetype}. Allowed types: ${allowedTypes.join(', ')}`);
-    error.code = 'UNSUPPORTED_FILE_TYPE';
+    const error = new Error(
+      `Unsupported file type: ${
+        file.mimetype
+      }. Allowed types: ${allowedTypes.join(", ")}`
+    );
+    error.code = "UNSUPPORTED_FILE_TYPE";
     cb(error, false);
   }
 };
@@ -54,34 +65,34 @@ const upload = multer({
 // Middleware to handle multer errors
 const handleMulterError = (error, req, res, next) => {
   if (error instanceof multer.MulterError) {
-    if (error.code === 'LIMIT_FILE_SIZE') {
+    if (error.code === "LIMIT_FILE_SIZE") {
       return res.status(400).json({
         success: false,
-        message: 'File too large. Maximum file size is 100MB.',
-        error: 'FILE_TOO_LARGE'
+        message: "File too large. Maximum file size is 100MB.",
+        error: "FILE_TOO_LARGE",
       });
     }
-    if (error.code === 'LIMIT_FILE_COUNT') {
+    if (error.code === "LIMIT_FILE_COUNT") {
       return res.status(400).json({
         success: false,
-        message: 'Too many files. Maximum 10 files allowed per request.',
-        error: 'TOO_MANY_FILES'
+        message: "Too many files. Maximum 10 files allowed per request.",
+        error: "TOO_MANY_FILES",
       });
     }
-    if (error.code === 'LIMIT_UNEXPECTED_FILE') {
+    if (error.code === "LIMIT_UNEXPECTED_FILE") {
       return res.status(400).json({
         success: false,
         message: 'Unexpected field name. Use "files" as the field name.',
-        error: 'UNEXPECTED_FIELD'
+        error: "UNEXPECTED_FIELD",
       });
     }
   }
-  
-  if (error.code === 'UNSUPPORTED_FILE_TYPE') {
+
+  if (error.code === "UNSUPPORTED_FILE_TYPE") {
     return res.status(400).json({
       success: false,
       message: error.message,
-      error: 'UNSUPPORTED_FILE_TYPE'
+      error: "UNSUPPORTED_FILE_TYPE",
     });
   }
 
@@ -93,9 +104,9 @@ const handleMulterError = (error, req, res, next) => {
 const logRequest = (req, res, next) => {
   console.log(`File upload request: ${req.method} ${req.path}`, {
     timestamp: new Date().toISOString(),
-    userAgent: req.get('User-Agent'),
-    contentType: req.get('Content-Type'),
-    contentLength: req.get('Content-Length'),
+    userAgent: req.get("User-Agent"),
+    contentType: req.get("Content-Type"),
+    contentLength: req.get("Content-Length"),
   });
   next();
 };
@@ -107,9 +118,9 @@ router.get("/config", getUploadConfig);
 
 // Upload multiple files (multipart/form-data)
 router.post(
-  "/",
+  "/files",
   logRequest,
-  employeeProtect,
+  // employeeProtect,
   upload.array("files", 10),
   handleMulterError,
   uploadFiles
@@ -121,4 +132,4 @@ router.post("/base64", logRequest, protect, uploadBase64Files);
 // Delete file from S3
 router.delete("/", protect, deleteFile);
 
-export default router; 
+export default router;

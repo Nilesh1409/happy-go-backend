@@ -22,7 +22,7 @@ const bikeSchema = new mongoose.Schema(
     },
     year: {
       type: Number,
-      required: [true, "Please add a year"],
+      required: false,
     },
     images: [
       {
@@ -30,33 +30,115 @@ const bikeSchema = new mongoose.Schema(
         required: [true, "Please add at least one image"],
       },
     ],
+    // Updated pricing structure with 4 categories
     pricePerDay: {
-      limitedKm: {
-        price: {
-          type: Number,
-          required: [true, "Please add a price for limited km"],
+      weekday: {
+        limitedKm: {
+          price: {
+            type: Number,
+            required: [true, "Please add weekday limited km price"],
+          },
+          kmLimit: {
+            type: Number,
+            required: [true, "Please add a km limit"],
+            default: 60,
+          },
+          isActive: {
+            type: Boolean,
+            default: true,
+          },
         },
-        kmLimit: {
-          type: Number,
-          required: [true, "Please add a km limit"],
-          default: 60,
-        },
-        isActive: {
-          type: Boolean,
-          default: true,
+        unlimited: {
+          price: {
+            type: Number,
+            required: [true, "Please add weekday unlimited km price"],
+          },
+          isActive: {
+            type: Boolean,
+            default: true,
+          },
         },
       },
-      unlimited: {
-        price: {
-          type: Number,
-          required: [true, "Please add a price for unlimited km"],
+      weekend: {
+        limitedKm: {
+          price: {
+            type: Number,
+            required: [true, "Please add weekend limited km price"],
+          },
+          kmLimit: {
+            type: Number,
+            required: [true, "Please add a km limit"],
+            default: 60,
+          },
+          isActive: {
+            type: Boolean,
+            default: true,
+          },
         },
-        isActive: {
-          type: Boolean,
-          default: true,
+        unlimited: {
+          price: {
+            type: Number,
+            required: [true, "Please add weekend unlimited km price"],
+          },
+          isActive: {
+            type: Boolean,
+            default: true,
+          },
         },
       },
     },
+    // Special date pricing periods
+    specialPricing: [
+      {
+        name: {
+          type: String,
+          required: true,
+        },
+        startDate: {
+          type: Date,
+          required: true,
+        },
+        endDate: {
+          type: Date,
+          required: true,
+        },
+        // Replace priceMultiplier with actual pricing structure
+        pricing: {
+          limitedKm: {
+            price: {
+              type: Number,
+              required: false,
+            },
+            kmLimit: {
+              type: Number,
+              default: 60,
+            },
+            isActive: {
+              type: Boolean,
+              default: false,
+            },
+          },
+          unlimited: {
+            price: {
+              type: Number,
+              required: false,
+            },
+            isActive: {
+              type: Boolean,
+              default: true,
+            },
+          },
+        },
+        isActive: {
+          type: Boolean,
+          default: true,
+        },
+        createdBy: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "Employee",
+        },
+      },
+    ],
     additionalKmPrice: {
       type: Number,
       required: [true, "Please add a price for additional km"],
@@ -71,15 +153,15 @@ const bikeSchema = new mongoose.Schema(
     },
     registrationNumber: {
       type: String,
-      required: [true, "Please add a registration number"],
+      required: false,
       unique: true,
+      sparse: true, // Allows multiple documents with null/undefined values
     },
     location: {
       type: String,
       required: [true, "Please add a location"],
     },
     features: [String],
-
     requiredDocuments: [
       {
         type: String,
@@ -138,6 +220,27 @@ const bikeSchema = new mongoose.Schema(
       type: String,
       enum: ["available", "booked", "maintenance", "unavailable"],
       default: "available",
+    },
+    // Bulk discount settings
+    bulkDiscounts: {
+      twoOrMore: {
+        type: Number,
+        default: 2, // 2% discount
+        min: 0,
+        max: 50,
+      },
+      threeToFour: {
+        type: Number,
+        default: 4, // 4% discount
+        min: 0,
+        max: 50,
+      },
+      fiveOrMore: {
+        type: Number,
+        default: 10, // 10% discount
+        min: 0,
+        max: 50,
+      },
     },
   },
   {
