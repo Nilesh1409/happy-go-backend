@@ -110,7 +110,7 @@ export const createBookingPayment = asyncHandler(async (req, res) => {
 
   // Create Razorpay order
   const options = {
-    amount: booking.priceDetails.totalAmount * 100, // amount in smallest currency unit (paise)
+    amount: Math.round(booking.priceDetails.totalAmount * 100), // amount in smallest currency unit (paise) - must be integer
     currency: "INR",
     receipt: `booking_${booking._id}`,
     payment_capture: 1, // auto capture
@@ -165,7 +165,7 @@ export const createExtendBookingPayment = asyncHandler(async (req, res) => {
 
   // 6. Create a Razorpay order for exactly that extra amount
   const razorpayOptions = {
-    amount: additionalAmount * 100, // in paise (₹ → paise)
+    amount: Math.round(additionalAmount * 100), // in paise (₹ → paise) - must be integer
     currency: "INR",
     receipt: `extension_${booking._id}_${Date.now()}`, // e.g. extension_60f0b0a1d48abc1234567890_1627672800000
     payment_capture: 1, // auto capture
@@ -228,7 +228,7 @@ export const createOrderPayment = asyncHandler(async (req, res) => {
       message: "Development mode: Payment automatically marked as completed",
       data: {
         id: "mock_order_" + Date.now(),
-        amount: order.priceDetails.totalAmount * 100,
+        amount: Math.round(order.priceDetails.totalAmount * 100),
         currency: "INR",
         receipt: `order_${order._id}`,
         orderId: order._id,
@@ -255,7 +255,7 @@ export const createOrderPayment = asyncHandler(async (req, res) => {
       message: "Development mode: Payment automatically marked as completed",
       data: {
         id: "mock_order_" + Date.now(),
-        amount: order.priceDetails.totalAmount * 100,
+        amount: Math.round(order.priceDetails.totalAmount * 100),
         currency: "INR",
         receipt: `order_${order._id}`,
         orderId: order._id,
@@ -265,7 +265,7 @@ export const createOrderPayment = asyncHandler(async (req, res) => {
 
   // Create Razorpay order
   const options = {
-    amount: order.priceDetails.totalAmount * 100, // amount in smallest currency unit (paise)
+    amount: Math.round(order.priceDetails.totalAmount * 100), // amount in smallest currency unit (paise) - must be integer
     currency: "INR",
     receipt: `order_${order._id}`,
     payment_capture: 1, // auto capture

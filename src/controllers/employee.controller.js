@@ -175,9 +175,11 @@ export const getDashboardData = asyncHandler(async (req, res) => {
 
     // Add pending status to bike details
     if (recentBikeBookings.length > 0) {
-      // Get all bike IDs from recent bookings
-      const bikeIds = recentBikeBookings.map(booking => booking.bike._id);
-      
+      // Get all bike IDs from recent bookings (filter out null/undefined bikes)
+      const bikeIds = recentBikeBookings
+        .filter((booking) => booking.bike && booking.bike._id)
+        .map((booking) => booking.bike._id);
+
       // Get pending bookings for these bikes (same logic as pendingBikeBookings count)
       const pendingBookingsForBikes = await Booking.find({
         bookingType: "bike",
@@ -191,38 +193,60 @@ export const getDashboardData = asyncHandler(async (req, res) => {
 
       // Create a map of bike ID to pending info
       const pendingBikeMap = {};
-      pendingBookingsForBikes.forEach(booking => {
+      pendingBookingsForBikes.forEach((booking) => {
+        // Skip bookings without valid bike reference
+        if (!booking.bike) return;
+
         const bikeId = booking.bike.toString();
         if (!pendingBikeMap[bikeId]) {
           let pendingReason = "Awaiting payment confirmation";
-          
+
           if (booking.bookingStatus === "pending") {
-            pendingReason = booking.specialRequests || "Awaiting payment confirmation";
-          } else if (booking.bookingStatus === "confirmed" && booking.endDate <= new Date()) {
+            pendingReason =
+              booking.specialRequests || "Awaiting payment confirmation";
+          } else if (
+            booking.bookingStatus === "confirmed" &&
+            booking.endDate <= new Date()
+          ) {
             pendingReason = "Booking overdue - needs completion";
           }
-          
+
           pendingBikeMap[bikeId] = {
             pending: true,
             pendingReason: pendingReason,
-            pendingSince: booking.createdAt
+            pendingSince: booking.createdAt,
           };
         }
       });
 
       // Add pending status to bike details in recent bookings
-      recentBikeBookings = recentBikeBookings.map(booking => {
+      recentBikeBookings = recentBikeBookings.map((booking) => {
         const bookingObj = booking.toObject();
-        const bikeId = booking.bike._id.toString();
-        
-        if (pendingBikeMap[bikeId]) {
-          bookingObj.bike.pending = true;
-          bookingObj.bike.pendingReason = pendingBikeMap[bikeId].pendingReason;
-          bookingObj.bike.pendingSince = pendingBikeMap[bikeId].pendingSince;
+
+        // Only process if bike exists
+        if (booking.bike && booking.bike._id) {
+          const bikeId = booking.bike._id.toString();
+
+          if (pendingBikeMap[bikeId]) {
+            bookingObj.bike.pending = true;
+            bookingObj.bike.pendingReason =
+              pendingBikeMap[bikeId].pendingReason;
+            bookingObj.bike.pendingSince = pendingBikeMap[bikeId].pendingSince;
+          } else {
+            bookingObj.bike.pending = false;
+          }
         } else {
-          bookingObj.bike.pending = false;
+          // If bike doesn't exist, mark as unavailable
+          bookingObj.bike = {
+            title: "Bike Unavailable",
+            brand: "N/A",
+            model: "N/A",
+            images: [],
+            pending: false,
+            unavailable: true,
+          };
         }
-        
+
         return bookingObj;
       });
     }
@@ -264,8 +288,8 @@ export const getDashboardData = asyncHandler(async (req, res) => {
     // Add pending status to hotel details
     if (recentHotelBookings.length > 0) {
       // Get all hotel IDs from recent bookings
-      const hotelIds = recentHotelBookings.map(booking => booking.hotel._id);
-      
+      const hotelIds = recentHotelBookings.map((booking) => booking.hotel._id);
+
       // Get pending bookings for these hotels (same logic as pendingHotelBookings count)
       const pendingBookingsForHotels = await Booking.find({
         bookingType: "hotel",
@@ -279,38 +303,43 @@ export const getDashboardData = asyncHandler(async (req, res) => {
 
       // Create a map of hotel ID to pending info
       const pendingHotelMap = {};
-      pendingBookingsForHotels.forEach(booking => {
+      pendingBookingsForHotels.forEach((booking) => {
         const hotelId = booking.hotel.toString();
         if (!pendingHotelMap[hotelId]) {
           let pendingReason = "Awaiting payment confirmation";
-          
+
           if (booking.bookingStatus === "pending") {
-            pendingReason = booking.specialRequests || "Awaiting payment confirmation";
-          } else if (booking.bookingStatus === "confirmed" && booking.endDate <= new Date()) {
+            pendingReason =
+              booking.specialRequests || "Awaiting payment confirmation";
+          } else if (
+            booking.bookingStatus === "confirmed" &&
+            booking.endDate <= new Date()
+          ) {
             pendingReason = "Booking overdue - needs completion";
           }
-          
+
           pendingHotelMap[hotelId] = {
             pending: true,
             pendingReason: pendingReason,
-            pendingSince: booking.createdAt
+            pendingSince: booking.createdAt,
           };
         }
       });
 
       // Add pending status to hotel details in recent bookings
-      recentHotelBookings = recentHotelBookings.map(booking => {
+      recentHotelBookings = recentHotelBookings.map((booking) => {
         const bookingObj = booking.toObject();
         const hotelId = booking.hotel._id.toString();
-        
+
         if (pendingHotelMap[hotelId]) {
           bookingObj.hotel.pending = true;
-          bookingObj.hotel.pendingReason = pendingHotelMap[hotelId].pendingReason;
+          bookingObj.hotel.pendingReason =
+            pendingHotelMap[hotelId].pendingReason;
           bookingObj.hotel.pendingSince = pendingHotelMap[hotelId].pendingSince;
         } else {
           bookingObj.hotel.pending = false;
         }
-        
+
         return bookingObj;
       });
     }
@@ -346,20 +375,24 @@ export const getDashboardData = asyncHandler(async (req, res) => {
     // Add pending status to order details
     if (recentOrders.length > 0) {
       // Add pending status to each order
-      recentOrders = recentOrders.map(order => {
+      recentOrders = recentOrders.map((order) => {
         const orderObj = order.toObject();
-        
+
         // Check if order has pending status
-        if (order.orderStatus === "pending" || order.orderStatus === "processing") {
+        if (
+          order.orderStatus === "pending" ||
+          order.orderStatus === "processing"
+        ) {
           orderObj.pending = true;
-          orderObj.pendingReason = order.orderStatus === "pending" 
-            ? "Order awaiting processing" 
-            : "Order is being processed";
+          orderObj.pendingReason =
+            order.orderStatus === "pending"
+              ? "Order awaiting processing"
+              : "Order is being processed";
           orderObj.pendingSince = order.createdAt;
         } else {
           orderObj.pending = false;
         }
-        
+
         return orderObj;
       });
     }
@@ -954,6 +987,9 @@ export const getEmployeeBikes = asyncHandler(async (req, res) => {
 
   // 3. Group end-times by bike ID
   const bookingMap = activeBookings.reduce((map, bk) => {
+    // Skip bookings without valid bike reference
+    if (!bk.bike) return map;
+
     const id = bk.bike.toString();
     const [eh, em] = bk.endTime.split(":").map(Number);
     const endDt = new Date(bk.endDate);
@@ -981,13 +1017,30 @@ export const getEmployeeBikes = asyncHandler(async (req, res) => {
       nextAvailable = new Date(earliestMs).toISOString();
     }
 
+    // Get the rental price - try weekday limited first, fallback to other options
+    let rentalPrice = 0;
+    try {
+      if (bike.pricePerDay?.weekday?.limitedKm?.price) {
+        rentalPrice = bike.pricePerDay.weekday.limitedKm.price;
+      } else if (bike.pricePerDay?.weekday?.unlimited?.price) {
+        rentalPrice = bike.pricePerDay.weekday.unlimited.price;
+      } else if (bike.pricePerDay?.weekend?.limitedKm?.price) {
+        rentalPrice = bike.pricePerDay.weekend.limitedKm.price;
+      } else if (bike.pricePerDay?.weekend?.unlimited?.price) {
+        rentalPrice = bike.pricePerDay.weekend.unlimited.price;
+      }
+    } catch (error) {
+      console.error(`Error getting price for bike ${bike._id}:`, error);
+      rentalPrice = 0;
+    }
+
     return {
       _id: bike._id,
       title: bike.title,
       model: bike.model,
       bikeId: bike.registrationNumber,
       category: bike.brand,
-      rentalPrice: bike.pricePerDay.limitedKm.price,
+      rentalPrice: rentalPrice,
       images: bike.images,
       status: bikeStatus,
       quantity: total,
@@ -1031,14 +1084,47 @@ export const getEmployeeBikeById = asyncHandler(async (req, res) => {
     images: bike.images,
     status: bike.isAvailable ? "available" : "maintenance",
     pricePerDay: {
-      limitedKm: {
-        price: bike.pricePerDay.limitedKm.price,
-        kmLimit: bike.pricePerDay.limitedKm.kmLimit,
-        isActive: bike.pricePerDay.limitedKm.isActive,
+      weekday: {
+        limitedKm: {
+          price:
+            bike.pricePerDay?.weekday?.limitedKm?.price ||
+            bike.pricePerDay?.limitedKm?.price,
+          kmLimit:
+            bike.pricePerDay?.weekday?.limitedKm?.kmLimit ||
+            bike.pricePerDay?.limitedKm?.kmLimit,
+          isActive:
+            bike.pricePerDay?.weekday?.limitedKm?.isActive ||
+            bike.pricePerDay?.limitedKm?.isActive,
+        },
+        unlimited: {
+          price:
+            bike.pricePerDay?.weekday?.unlimited?.price ||
+            bike.pricePerDay?.unlimited?.price,
+          isActive:
+            bike.pricePerDay?.weekday?.unlimited?.isActive ||
+            bike.pricePerDay?.unlimited?.isActive,
+        },
       },
-      unlimited: {
-        price: bike.pricePerDay.unlimited.price,
-        isActive: bike.pricePerDay.unlimited.isActive,
+      weekend: {
+        limitedKm: {
+          price:
+            bike.pricePerDay?.weekend?.limitedKm?.price ||
+            bike.pricePerDay?.limitedKm?.price,
+          kmLimit:
+            bike.pricePerDay?.weekend?.limitedKm?.kmLimit ||
+            bike.pricePerDay?.limitedKm?.kmLimit,
+          isActive:
+            bike.pricePerDay?.weekend?.limitedKm?.isActive ||
+            bike.pricePerDay?.limitedKm?.isActive,
+        },
+        unlimited: {
+          price:
+            bike.pricePerDay?.weekend?.unlimited?.price ||
+            bike.pricePerDay?.unlimited?.price,
+          isActive:
+            bike.pricePerDay?.weekend?.unlimited?.isActive ||
+            bike.pricePerDay?.unlimited?.isActive,
+        },
       },
     },
     additionalKmPrice: bike.additionalKmPrice,
@@ -1058,12 +1144,23 @@ export const createBike = asyncHandler(async (req, res) => {
     title,
     model,
     bikeId,
-    category,
-    rentalPrice,
+    brand,
     description,
     location,
     features,
     images,
+    pricePerDay,
+    additionalKmPrice,
+    isAvailable,
+    isTrending,
+    quantity,
+    ratings,
+    bulkDiscounts,
+    requiredDocuments,
+    termsAndConditions,
+    // Legacy fields for backward compatibility
+    category,
+    rentalPrice,
     status,
   } = req.body;
 
@@ -1071,10 +1168,8 @@ export const createBike = asyncHandler(async (req, res) => {
   if (
     !title ||
     !model ||
-    !bikeId ||
-    !category ||
-    !rentalPrice ||
-    !description ||
+    !(brand || category) || // Accept either brand or category
+    !(pricePerDay || rentalPrice) || // Accept either new or old format
     !location ||
     !features ||
     !images
@@ -1082,30 +1177,76 @@ export const createBike = asyncHandler(async (req, res) => {
     throw new ApiError("Please provide all required fields", 400);
   }
 
-  // Create bike
-  const bike = await Bike.create({
+  // Create bike data object
+  const bikeCreateData = {
     title,
-    brand: category,
+    brand: brand || category, // Use brand if provided, fallback to category
     model,
-    year: new Date().getFullYear(),
     description,
-    registrationNumber: bikeId,
     location,
     features,
     images,
-    pricePerDay: {
-      limitedKm: {
-        price: Number(rentalPrice),
-        kmLimit: 60,
+    additionalKmPrice: additionalKmPrice || 4,
+    isAvailable:
+      isAvailable !== undefined ? isAvailable : status === "available",
+    isTrending: isTrending || false,
+    quantity: quantity || 1,
+    ratings: ratings || 4,
+  };
+
+  // Handle pricing - support both new and legacy formats
+  if (pricePerDay) {
+    // New format - use the provided pricePerDay structure
+    bikeCreateData.pricePerDay = pricePerDay;
+  } else if (rentalPrice) {
+    // Legacy format - convert rentalPrice to new structure
+    bikeCreateData.pricePerDay = {
+      weekday: {
+        limitedKm: {
+          price: Number(rentalPrice),
+          kmLimit: 60,
+          isActive: true,
+        },
+        unlimited: {
+          price: Number(rentalPrice) * 1.5,
+          isActive: true,
+        },
       },
-      unlimited: {
-        price: Number(rentalPrice) * 1.5,
+      weekend: {
+        limitedKm: {
+          price: Number(rentalPrice) * 1.5,
+          kmLimit: 60,
+          isActive: true,
+        },
+        unlimited: {
+          price: Number(rentalPrice) * 2,
+          isActive: true,
+        },
       },
-    },
-    additionalKmPrice: 4,
-    isAvailable: status === "available",
-    isTrending: false,
-  });
+    };
+  }
+
+  // Add optional fields
+  if (bulkDiscounts) {
+    bikeCreateData.bulkDiscounts = bulkDiscounts;
+  }
+
+  if (requiredDocuments) {
+    bikeCreateData.requiredDocuments = requiredDocuments;
+  }
+
+  if (termsAndConditions) {
+    bikeCreateData.termsAndConditions = termsAndConditions;
+  }
+
+  if (bikeId) {
+    bikeCreateData.registrationNumber = bikeId;
+  }
+
+  // Default year to current year if not provided in request body
+  bikeCreateData.year = req.body.year || new Date().getFullYear();
+
+  const bike = await Bike.create(bikeCreateData);
 
   res.status(201).json({
     success: true,
@@ -1121,7 +1262,8 @@ export const updateBike = asyncHandler(async (req, res) => {
     title,
     model,
     bikeId,
-    category,
+    brand,
+    category, // Legacy field
     description,
     location,
     features,
@@ -1130,8 +1272,13 @@ export const updateBike = asyncHandler(async (req, res) => {
     quantity,
     year,
     requiredDocuments,
-    pricePerDay, // ← NEW
-    additionalKmPrice, // ← NEW
+    termsAndConditions,
+    ratings,
+    isTrending,
+    isAvailable,
+    bulkDiscounts,
+    pricePerDay,
+    additionalKmPrice,
   } = req.body;
 
   const bike = await Bike.findById(req.params.id);
@@ -1141,32 +1288,75 @@ export const updateBike = asyncHandler(async (req, res) => {
   if (title) bike.title = title;
   if (model) bike.model = model;
   if (bikeId) bike.registrationNumber = bikeId;
-  if (category) bike.brand = category;
+  if (brand || category) bike.brand = brand || category; // Support both brand and category
   if (description) bike.description = description;
   if (location) bike.location = location;
   if (features) bike.features = features;
   if (images) bike.images = images;
   if (status) bike.isAvailable = status === "available";
+  if (isAvailable !== undefined) bike.isAvailable = Boolean(isAvailable);
   if (quantity !== undefined) bike.quantity = Number(quantity);
   if (year) bike.year = Number(year);
   if (requiredDocuments) bike.requiredDocuments = requiredDocuments;
+  if (termsAndConditions) bike.termsAndConditions = termsAndConditions;
+  if (ratings !== undefined) bike.ratings = Number(ratings);
+  if (isTrending !== undefined) bike.isTrending = Boolean(isTrending);
+  if (bulkDiscounts) bike.bulkDiscounts = bulkDiscounts;
 
   // Update pricing
   if (pricePerDay) {
-    const { limitedKm, unlimited } = pricePerDay;
-    if (limitedKm) {
-      if (limitedKm.price !== undefined)
-        bike.pricePerDay.limitedKm.price = Number(limitedKm.price);
-      if (limitedKm.kmLimit !== undefined)
-        bike.pricePerDay.limitedKm.kmLimit = Number(limitedKm.kmLimit);
-      if (limitedKm.isActive !== undefined)
-        bike.pricePerDay.limitedKm.isActive = Boolean(limitedKm.isActive);
+    // Handle weekday pricing
+    if (pricePerDay.weekday) {
+      const { limitedKm, unlimited } = pricePerDay.weekday;
+
+      if (limitedKm) {
+        if (limitedKm.price !== undefined)
+          bike.pricePerDay.weekday.limitedKm.price = Number(limitedKm.price);
+        if (limitedKm.kmLimit !== undefined)
+          bike.pricePerDay.weekday.limitedKm.kmLimit = Number(
+            limitedKm.kmLimit
+          );
+        if (limitedKm.isActive !== undefined)
+          bike.pricePerDay.weekday.limitedKm.isActive = Boolean(
+            limitedKm.isActive
+          );
+      }
+
+      if (unlimited) {
+        if (unlimited.price !== undefined)
+          bike.pricePerDay.weekday.unlimited.price = Number(unlimited.price);
+        if (unlimited.isActive !== undefined)
+          bike.pricePerDay.weekday.unlimited.isActive = Boolean(
+            unlimited.isActive
+          );
+      }
     }
-    if (unlimited) {
-      if (unlimited.price !== undefined)
-        bike.pricePerDay.unlimited.price = Number(unlimited.price);
-      if (unlimited.isActive !== undefined)
-        bike.pricePerDay.unlimited.isActive = Boolean(unlimited.isActive);
+
+    // Handle weekend pricing
+    if (pricePerDay.weekend) {
+      const { limitedKm, unlimited } = pricePerDay.weekend;
+
+      if (limitedKm) {
+        if (limitedKm.price !== undefined)
+          bike.pricePerDay.weekend.limitedKm.price = Number(limitedKm.price);
+        if (limitedKm.kmLimit !== undefined)
+          bike.pricePerDay.weekend.limitedKm.kmLimit = Number(
+            limitedKm.kmLimit
+          );
+        if (limitedKm.isActive !== undefined)
+          bike.pricePerDay.weekend.limitedKm.isActive = Boolean(
+            limitedKm.isActive
+          );
+      }
+
+      if (unlimited) {
+        if (unlimited.price !== undefined)
+          bike.pricePerDay.weekend.unlimited.price = Number(unlimited.price);
+        if (unlimited.isActive !== undefined)
+          bike.pricePerDay.weekend.unlimited.isActive = Boolean(
+            unlimited.isActive
+          );
+      }
     }
   }
 
