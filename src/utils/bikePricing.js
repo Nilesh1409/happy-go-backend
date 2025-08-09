@@ -1,3 +1,8 @@
+// Helper function to round to 2 decimal places
+function roundToTwo(num) {
+  return Math.round((num + Number.EPSILON) * 100) / 100;
+}
+
 export function calculateExtraAmount({
   bike,
   startTime,
@@ -230,12 +235,12 @@ export async function calculateRentalPricing({
     !specialPricing
   ) {
     // Short weekday booking within same day (50% of daily rate) - only for regular pricing
-    pricePerUnit = selectedOption.price * 0.5;
+    pricePerUnit = roundToTwo(selectedOption.price * 0.5);
     breakdown.type = "weekday_short";
     breakdown.duration = `${totalHours.toFixed(1)} hours`;
   } else {
     // Full day pricing based on date changes
-    pricePerUnit = selectedOption.price * daysDifference;
+    pricePerUnit = roundToTwo(selectedOption.price * daysDifference);
     if (specialPricing) {
       breakdown.type = "special_date";
     } else {
@@ -245,10 +250,10 @@ export async function calculateRentalPricing({
   }
 
   // Apply surge multiplier directly to the base rental price
-  pricePerUnit = pricePerUnit * surgeMultiplier;
+  pricePerUnit = roundToTwo(pricePerUnit * surgeMultiplier);
 
   breakdown.pricePerUnit = pricePerUnit;
-  basePrice = pricePerUnit * quantity;
+  basePrice = roundToTwo(pricePerUnit * quantity);
   breakdown.basePrice = basePrice;
 
   // Calculate extra charges (per booking, not per bike)
@@ -256,26 +261,26 @@ export async function calculateRentalPricing({
   breakdown.extraCharges = extraCharges;
 
   // Calculate subtotal before discounts
-  const subtotal = basePrice + extraCharges;
+  const subtotal = roundToTwo(basePrice + extraCharges);
   breakdown.subtotal = subtotal;
 
   // Calculate bulk discount
   const bulkDiscount = calculateBulkDiscount(quantity, bike);
-  bulkDiscount.amount = (subtotal * bulkDiscount.percentage) / 100;
+  bulkDiscount.amount = roundToTwo((subtotal * bulkDiscount.percentage) / 100);
   breakdown.bulkDiscount = bulkDiscount;
 
   // Apply bulk discount
-  const afterDiscount = subtotal - bulkDiscount.amount;
+  const afterDiscount = roundToTwo(subtotal - bulkDiscount.amount);
 
   // Calculate GST
   const gstPercentage = 5;
-  const gst = afterDiscount * (gstPercentage / 100);
-  breakdown.gst = Math.round(gst * 100) / 100;
+  const gst = roundToTwo(afterDiscount * (gstPercentage / 100));
+  breakdown.gst = gst;
   breakdown.gstPercentage = gstPercentage;
 
   // Calculate final total
-  const total = afterDiscount + breakdown.gst;
-  breakdown.total = Math.round(total * 100) / 100;
+  const total = roundToTwo(afterDiscount + gst);
+  breakdown.total = total;
 
   return {
     totalPrice: breakdown.total,
@@ -316,13 +321,13 @@ export async function calculateCartPricing({
         bikeId: item.bike._id,
         quantity: item.quantity,
         kmOption: item.kmOption,
-        pricePerUnit: pricing.breakdown.pricePerUnit,
-        totalPrice: pricing.totalPrice,
-        totalPriceWithoutGst: pricing?.breakdown?.subtotal,
+        pricePerUnit: roundToTwo(pricing.breakdown.pricePerUnit),
+        totalPrice: roundToTwo(pricing.totalPrice),
+        totalPriceWithoutGst: roundToTwo(pricing?.breakdown?.subtotal || 0),
         breakdown: pricing.breakdown,
       });
 
-      subtotal += pricing?.breakdown?.subtotal;
+      subtotal += roundToTwo(pricing?.breakdown?.subtotal || 0);
       totalQuantity += item.quantity;
       console.log("Cart item pricing:", {
         bikeId: item.bike._id,
@@ -360,12 +365,14 @@ export async function calculateCartPricing({
     const firstBike = items[0]?.bike;
     if (firstBike) {
       bulkDiscount = calculateBulkDiscount(totalQuantity, firstBike);
-      bulkDiscount.amount = (subtotal * bulkDiscount.percentage) / 100;
+      bulkDiscount.amount = roundToTwo(
+        (subtotal * bulkDiscount.percentage) / 100
+      );
     }
   }
 
   // Apply bulk discount
-  const afterBulkDiscount = subtotal - bulkDiscount.amount;
+  const afterBulkDiscount = roundToTwo(subtotal - bulkDiscount.amount);
 
   // Calculate extra charges (once per booking)
   const extraCharges = calculateTimeBasedCharges(startTime, endTime);
@@ -380,7 +387,7 @@ export async function calculateCartPricing({
       // Give 1 free helmet per bike booked
       const freeHelmets = totalQuantity;
       const chargeableHelmets = Math.max(0, helmetQuantity - freeHelmets);
-      helmetCharges = chargeableHelmets * helmet.pricePerHelmet;
+      helmetCharges = roundToTwo(chargeableHelmets * helmet.pricePerHelmet);
 
       // Create informative message
       if (chargeableHelmets > 0) {
@@ -396,27 +403,29 @@ export async function calculateCartPricing({
   }
 
   // Calculate total before GST (surge is now applied directly to rental prices)
-  const beforeGst = afterBulkDiscount + extraCharges + helmetCharges;
+  const beforeGst = roundToTwo(
+    afterBulkDiscount + extraCharges + helmetCharges
+  );
 
   // Calculate GST
   const gstPercentage = 5;
-  const gst = beforeGst * (gstPercentage / 100);
+  const gst = roundToTwo(beforeGst * (gstPercentage / 100));
 
   // Calculate final total
-  const total = beforeGst + gst;
+  const total = roundToTwo(beforeGst + gst);
 
   return {
     itemPricing,
-    subtotal,
+    subtotal: roundToTwo(subtotal),
     totalQuantity,
     bulkDiscount,
-    extraCharges,
-    helmetCharges,
+    extraCharges: roundToTwo(extraCharges),
+    helmetCharges: roundToTwo(helmetCharges),
     helmetMessage,
-    gst: Math.round(gst * 100) / 100,
+    gst: gst,
     gstPercentage,
-    total: Math.round(total * 100) / 100,
-    savings: bulkDiscount.amount,
+    total: total,
+    savings: roundToTwo(bulkDiscount.amount),
   };
 }
 

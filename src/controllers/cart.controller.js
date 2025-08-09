@@ -638,22 +638,38 @@ export const removeFromCart = asyncHandler(async (req, res) => {
 // @access  Private
 export const updateHelmetQuantity = asyncHandler(async (req, res) => {
   const { quantity } = req.body;
+  const { startDate, endDate, startTime, endTime } = req.query;
 
   if (quantity < 0 || quantity > 20) {
     throw new ApiError("Helmet quantity must be between 0 and 20", 400);
   }
 
-  const cart = await Cart.findOne({
+  // Build query to find the specific cart
+  let cartQuery = {
     user: req.user._id,
     isActive: true,
-  }).populate({
+  };
+
+  // If dates are provided, find cart for those specific dates
+  if (startDate && endDate && startTime && endTime) {
+    cartQuery.startDate = new Date(startDate);
+    cartQuery.endDate = new Date(endDate);
+    cartQuery.startTime = startTime;
+    cartQuery.endTime = endTime;
+  }
+
+  const cart = await Cart.findOne(cartQuery).populate({
     path: "items.bike",
     select:
       "title brand model images pricePerDay quantity specialPricing bulkDiscounts",
   });
 
   if (!cart) {
-    throw new ApiError("Cart not found", 404);
+    const errorMessage =
+      startDate && endDate && startTime && endTime
+        ? `Cart not found for dates ${startDate} to ${endDate}, ${startTime}-${endTime}`
+        : "No active cart found";
+    throw new ApiError(errorMessage, 404);
   }
 
   // Check helmet availability
@@ -695,6 +711,22 @@ export const updateHelmetQuantity = asyncHandler(async (req, res) => {
 
   cart.helmetDetails.quantity = quantity;
 
+  // Calculate total bike quantity for reference
+  const totalBikeQuantity = cart.items.reduce(
+    (total, item) => total + item.quantity,
+    0
+  );
+  console.log("Helmet update - Cart details:", {
+    cartId: cart._id,
+    dates: `${cart.startDate.toISOString().split("T")[0]} to ${
+      cart.endDate.toISOString().split("T")[0]
+    }`,
+    times: `${cart.startTime}-${cart.endTime}`,
+    totalBikes: totalBikeQuantity,
+    helmetQuantity: quantity,
+    itemsCount: cart.items.length,
+  });
+
   // Recalculate pricing
   if (cart.items.length > 0) {
     const pricing = await calculateCartPricing({
@@ -715,6 +747,28 @@ export const updateHelmetQuantity = asyncHandler(async (req, res) => {
       total: pricing.total,
     };
 
+    // Update individual item prices
+    pricing.itemPricing.forEach((itemPrice) => {
+      const cartItem = cart.items.find(
+        (item) =>
+          item.bike._id.toString() === itemPrice.bikeId.toString() &&
+          item.kmOption === itemPrice.kmOption
+      );
+      if (cartItem) {
+        cartItem.pricePerUnit = itemPrice.pricePerUnit;
+        cartItem.totalPrice = itemPrice.totalPrice;
+      } else {
+        console.error(`Cart item not found for pricing update:`, {
+          bikeId: itemPrice.bikeId,
+          kmOption: itemPrice.kmOption,
+          availableItems: cart.items.map((item) => ({
+            bikeId: item.bike._id,
+            kmOption: item.kmOption,
+          })),
+        });
+      }
+    });
+
     cart.helmetDetails.charges = pricing.helmetCharges;
     cart.helmetDetails.message = pricing.helmetMessage;
   }
@@ -727,6 +781,17 @@ export const updateHelmetQuantity = asyncHandler(async (req, res) => {
     success: true,
     data: cart,
     message: "Helmet quantity updated",
+    debug: {
+      cartId: cart._id,
+      cartDates: `${cart.startDate.toISOString().split("T")[0]} to ${
+        cart.endDate.toISOString().split("T")[0]
+      }`,
+      cartTimes: `${cart.startTime}-${cart.endTime}`,
+      totalBikeQuantity,
+      helmetQuantity: quantity,
+      relationship: `${quantity} helmets for ${totalBikeQuantity} bike(s)`,
+      itemsInCart: cart.items.length,
+    },
   });
 });
 
