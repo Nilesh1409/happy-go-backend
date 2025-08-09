@@ -6,7 +6,10 @@ import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import { sendEmail } from "../utils/sendEmail.js";
 import Helmet from "../models/helmet.model.js";
-import { calculateRentalPricing, calculateExtraAmount } from "../utils/bikePricing.js";
+import {
+  calculateRentalPricing,
+  calculateExtraAmount,
+} from "../utils/bikePricing.js";
 // const mongoose = require("mongoose");
 
 // @desc    Create new booking for single bike or multiple bikes
@@ -44,13 +47,7 @@ export const createBooking = asyncHandler(async (req, res) => {
   // Validate required fields based on booking type
   if (bookingType === "bike") {
     // Validate required bike fields
-    if (
-      !startDate ||
-      !endDate ||
-      !startTime ||
-      !endTime ||
-      !priceDetails
-    ) {
+    if (!startDate || !endDate || !startTime || !endTime || !priceDetails) {
       throw new ApiError(
         "Please provide startDate, endDate, startTime, endTime and priceDetails",
         400
@@ -81,22 +78,22 @@ export const createBooking = asyncHandler(async (req, res) => {
 
     // Check if booking includes weekend days
     const isWeekend = (date) => {
-      const day = date.getDay()
-      return day === 0 || day === 6 // Sunday, Saturday only
-    }
+      const day = date.getDay();
+      return day === 0 || day === 6; // Sunday, Saturday only
+    };
 
     const bookingIncludesWeekend = () => {
-      const current = new Date(startRequested)
+      const current = new Date(startRequested);
       while (current <= endRequested) {
         if (isWeekend(current)) {
-          return true
+          return true;
         }
-        current.setDate(current.getDate() + 1)
+        current.setDate(current.getDate() + 1);
       }
-      return false
-    }
+      return false;
+    };
 
-    const hasWeekendDays = bookingIncludesWeekend()
+    const hasWeekendDays = bookingIncludesWeekend();
 
     let processedBikeItems = [];
     let totalQuantity = 0;
@@ -105,7 +102,10 @@ export const createBooking = asyncHandler(async (req, res) => {
       // Process multiple bikes booking
       for (const item of bikeItems) {
         if (!item.bike || !item.quantity || !item.kmOption) {
-          throw new ApiError("Each bike item must have bike, quantity, and kmOption", 400);
+          throw new ApiError(
+            "Each bike item must have bike, quantity, and kmOption",
+            400
+          );
         }
 
         // Fetch bike document
@@ -115,10 +115,11 @@ export const createBooking = asyncHandler(async (req, res) => {
         }
 
         // Validate pricing options using proper nested structure
-        const pricingCategory = hasWeekendDays ? "weekend" : "weekday"
-        
+        const pricingCategory = hasWeekendDays ? "weekend" : "weekday";
+
         if (item.kmOption === "unlimited") {
-          const unlimitedOption = bike.pricePerDay?.[pricingCategory]?.unlimited
+          const unlimitedOption =
+            bike.pricePerDay?.[pricingCategory]?.unlimited;
           if (!unlimitedOption?.isActive || !unlimitedOption?.price) {
             throw new ApiError(
               `Unlimited km option is not available for ${bike.title} on ${pricingCategory} bookings`,
@@ -126,9 +127,9 @@ export const createBooking = asyncHandler(async (req, res) => {
             );
           }
         }
-        
+
         if (item.kmOption === "limited") {
-          const limitedOption = bike.pricePerDay?.[pricingCategory]?.limitedKm
+          const limitedOption = bike.pricePerDay?.[pricingCategory]?.limitedKm;
           if (!limitedOption?.isActive || !limitedOption?.price) {
             throw new ApiError(
               `Limited km option is not available for ${bike.title} on ${pricingCategory} bookings`,
@@ -166,10 +167,10 @@ export const createBooking = asyncHandler(async (req, res) => {
                 $cond: {
                   if: { $gt: [{ $size: { $ifNull: ["$bikeItems", []] } }, 0] },
                   then: "$bikeItems",
-                  else: [{ bike: "$bike", quantity: 1 }]
-                }
-              }
-            }
+                  else: [{ bike: "$bike", quantity: 1 }],
+                },
+              },
+            },
           },
           {
             $unwind: "$bikes",
@@ -198,22 +199,24 @@ export const createBooking = asyncHandler(async (req, res) => {
         }
 
         // Get pricing details
-        const pricingOption = item.kmOption === "unlimited" 
-          ? bike.pricePerDay[pricingCategory].unlimited
-          : bike.pricePerDay[pricingCategory].limitedKm;
+        const pricingOption =
+          item.kmOption === "unlimited"
+            ? bike.pricePerDay[pricingCategory].unlimited
+            : bike.pricePerDay[pricingCategory].limitedKm;
 
         processedBikeItems.push({
           bike: bike._id,
           quantity: item.quantity,
           kmOption: item.kmOption,
           pricePerUnit: item.pricePerUnit || pricingOption.price,
-          totalPrice: item.totalPrice || (pricingOption.price * item.quantity),
-          kmLimit: item.kmOption === "limited" ? pricingOption.kmLimit : undefined,
+          totalPrice: item.totalPrice || pricingOption.price * item.quantity,
+          kmLimit:
+            item.kmOption === "limited" ? pricingOption.kmLimit : undefined,
           additionalKmPrice: bike.additionalKmPrice,
           bikeUnits: Array.from({ length: item.quantity }, (_, index) => ({
             unitNumber: index + 1,
-            status: "pending"
-          }))
+            status: "pending",
+          })),
         });
 
         totalQuantity += item.quantity;
@@ -226,10 +229,10 @@ export const createBooking = asyncHandler(async (req, res) => {
       }
 
       // Validate pricing options using proper nested structure
-      const pricingCategory = hasWeekendDays ? "weekend" : "weekday"
-      
+      const pricingCategory = hasWeekendDays ? "weekend" : "weekday";
+
       if (bikeDetails.isUnlimited) {
-        const unlimitedOption = bike.pricePerDay?.[pricingCategory]?.unlimited
+        const unlimitedOption = bike.pricePerDay?.[pricingCategory]?.unlimited;
         if (!unlimitedOption?.isActive || !unlimitedOption?.price) {
           throw new ApiError(
             `Unlimited km option is not available for ${pricingCategory} bookings`,
@@ -237,9 +240,9 @@ export const createBooking = asyncHandler(async (req, res) => {
           );
         }
       }
-      
+
       if (!bikeDetails.isUnlimited) {
-        const limitedOption = bike.pricePerDay?.[pricingCategory]?.limitedKm
+        const limitedOption = bike.pricePerDay?.[pricingCategory]?.limitedKm;
         if (!limitedOption?.isActive || !limitedOption?.price) {
           throw new ApiError(
             `Limited km option is not available for ${pricingCategory} bookings`,
@@ -293,7 +296,10 @@ export const createBooking = asyncHandler(async (req, res) => {
       const totalUnits = bike.quantity;
 
       if (alreadyBookedCount >= totalUnits) {
-        throw new ApiError("Bike is not available for the selected period", 400);
+        throw new ApiError(
+          "Bike is not available for the selected period",
+          400
+        );
       }
 
       totalQuantity = 1;
@@ -337,18 +343,22 @@ export const createBooking = asyncHandler(async (req, res) => {
 
       // Validate helmet charges calculation - 1 free helmet per bike
       const freeHelmets = totalQuantity;
-      const expectedHelmetCharges = Math.max(0, helmetQuantity - freeHelmets) * helmet.pricePerHelmet;
+      const expectedHelmetCharges =
+        Math.max(0, helmetQuantity - freeHelmets) * helmet.pricePerHelmet;
       const sentHelmetCharges = priceDetails.helmetCharges || 0;
-      
+
       if (Math.abs(expectedHelmetCharges - sentHelmetCharges) > 0.01) {
         console.log("Helmet charges mismatch:", {
           expected: expectedHelmetCharges,
           sent: sentHelmetCharges,
           requestedHelmets: helmetQuantity,
           freeHelmets: freeHelmets,
-          pricePerHelmet: helmet.pricePerHelmet
+          pricePerHelmet: helmet.pricePerHelmet,
         });
-        throw new ApiError("Helmet charges calculation mismatch. Please refresh and try again.", 400);
+        throw new ApiError(
+          "Helmet charges calculation mismatch. Please refresh and try again.",
+          400
+        );
       }
     }
 
@@ -390,7 +400,10 @@ export const createBooking = asyncHandler(async (req, res) => {
     if (isMultipleBikes) {
       for (const item of processedBikeItems) {
         const bike = await Bike.findById(item.bike);
-        bike.availableQuantity = Math.max(0, bike.availableQuantity - item.quantity);
+        bike.availableQuantity = Math.max(
+          0,
+          bike.availableQuantity - item.quantity
+        );
         if (bike.availableQuantity <= 0) {
           bike.status = "booked";
         }
@@ -408,40 +421,39 @@ export const createBooking = asyncHandler(async (req, res) => {
     // Send confirmation email & SMS
     const user = await User.findById(req.user._id).select("name email mobile");
     const gstPercentage = priceDetails.gstPercentage || 5;
-    
-    const bikeInfo = isMultipleBikes 
+
+    const bikeInfo = isMultipleBikes
       ? `${processedBikeItems.length} bike(s) with ${totalQuantity} total units`
       : "1 bike";
 
-    const emailMessage = `
-      <h1>Bike Booking Confirmation</h1>
-      <p>Dear ${user.name},</p>
-      <p>Your bike booking has been confirmed.</p>
-      <p>Booking ID: ${booking._id}</p>
-      <p>Bikes: ${bikeInfo}</p>
-      <p>Start: ${new Date(
-        startDate + "T" + startTime + ":00"
-      ).toLocaleString()}</p>
-      <p>End: ${new Date(endDate + "T" + endTime + ":00").toLocaleString()}</p>
-      <p>Helmets: ${helmetQuantity}</p>
-      <p>Helmet Charges: ₹${(priceDetails.helmetCharges || 0).toFixed(2)}</p>
-      <p>Extra Charges: ₹${(priceDetails.extraCharges || 0).toFixed(2)}</p>
-      <p>GST (${gstPercentage}%): ₹${(priceDetails.taxes || 0).toFixed(2)}</p>
-      <p>Total Amount: ₹${priceDetails.totalAmount.toFixed(2)}</p>
-      <p>Thank you for choosing HappyGo!</p>
-    `;
+    // const emailMessage = `
+    //   <h1>Bike Booking Confirmation</h1>
+    //   <p>Dear ${user.name},</p>
+    //   <p>Your bike booking has been confirmed.</p>
+    //   <p>Booking ID: ${booking._id}</p>
+    //   <p>Bikes: ${bikeInfo}</p>
+    //   <p>Start: ${new Date(
+    //     startDate + "T" + startTime + ":00"
+    //   ).toLocaleString()}</p>
+    //   <p>End: ${new Date(endDate + "T" + endTime + ":00").toLocaleString()}</p>
+    //   <p>Helmets: ${helmetQuantity}</p>
+    //   <p>Helmet Charges: ₹${(priceDetails.helmetCharges || 0).toFixed(2)}</p>
+    //   <p>Extra Charges: ₹${(priceDetails.extraCharges || 0).toFixed(2)}</p>
+    //   <p>GST (${gstPercentage}%): ₹${(priceDetails.taxes || 0).toFixed(2)}</p>
+    //   <p>Total Amount: ₹${priceDetails.totalAmount.toFixed(2)}</p>
+    //   <p>Thank you for choosing HappyGo!</p>
+    // `;
 
-    await sendEmail({
-      email: user.email,
-      subject: "HappyGo Bike Booking Confirmation",
-      message: emailMessage,
-    });
+    // await sendEmail({
+    //   email: user.email,
+    //   subject: "HappyGo Bike Booking Confirmation",
+    //   message: emailMessage,
+    // });
 
     return res.status(201).json({
       success: true,
       data: booking,
     });
-
   } else if (bookingType === "hotel") {
     // Hotel booking logic remains unchanged
     if (
@@ -602,6 +614,10 @@ export const getBookings = asyncHandler(async (req, res) => {
       select: "title brand model images",
     })
     .populate({
+      path: "bikeItems.bike",
+      select: "title brand model images",
+    })
+    .populate({
       path: "hotel",
       select: "name location images",
     })
@@ -626,15 +642,18 @@ export const getBooking = asyncHandler(async (req, res) => {
   const booking = await Booking.findById(req.params.id)
     .populate({
       path: "bike",
-      select: "title brand model year images pricePerDay additionalKmPrice registrationNumber location features requiredDocuments termsAndConditions ratings numReviews quantity availableQuantity status isTrending specialPricing bulkDiscounts",
+      select:
+        "title brand model year images pricePerDay additionalKmPrice registrationNumber location features requiredDocuments termsAndConditions ratings numReviews quantity availableQuantity status isTrending specialPricing bulkDiscounts",
     })
     .populate({
       path: "bikeItems.bike",
-      select: "title brand model year images pricePerDay additionalKmPrice registrationNumber location features requiredDocuments termsAndConditions ratings numReviews quantity availableQuantity status isTrending specialPricing bulkDiscounts",
+      select:
+        "title brand model year images pricePerDay additionalKmPrice registrationNumber location features requiredDocuments termsAndConditions ratings numReviews quantity availableQuantity status isTrending specialPricing bulkDiscounts",
     })
     .populate({
       path: "hotel",
-      select: "name description location images rooms amenities policies ratings numReviews checkInTime checkOutTime address contactInfo",
+      select:
+        "name description location images rooms amenities policies ratings numReviews checkInTime checkOutTime address contactInfo",
     })
     .populate({
       path: "user",
@@ -667,31 +686,45 @@ export const getBooking = asyncHandler(async (req, res) => {
   // For bike bookings, add useful computed information
   if (booking.bookingType === "bike") {
     // Calculate rental duration in hours and days
-    const startDateTime = new Date(`${booking.startDate.toISOString().split('T')[0]}T${booking.startTime}`);
-    const endDateTime = new Date(`${booking.endDate.toISOString().split('T')[0]}T${booking.endTime}`);
+    const startDateTime = new Date(
+      `${booking.startDate.toISOString().split("T")[0]}T${booking.startTime}`
+    );
+    const endDateTime = new Date(
+      `${booking.endDate.toISOString().split("T")[0]}T${booking.endTime}`
+    );
     const durationInHours = (endDateTime - startDateTime) / (1000 * 60 * 60);
     const durationInDays = Math.ceil(durationInHours / 24);
 
     enhancedBooking.computedDetails = {
       durationInHours: Math.round(durationInHours * 100) / 100,
       durationInDays,
-      isOverdue: booking.bookingStatus === "confirmed" && new Date() > endDateTime,
-      canExtend: booking.bookingStatus === "confirmed" && new Date() < endDateTime,
-      canCancel: booking.bookingStatus === "pending" || (booking.bookingStatus === "confirmed" && new Date() < startDateTime),
+      isOverdue:
+        booking.bookingStatus === "confirmed" && new Date() > endDateTime,
+      canExtend:
+        booking.bookingStatus === "confirmed" && new Date() < endDateTime,
+      canCancel:
+        booking.bookingStatus === "pending" ||
+        (booking.bookingStatus === "confirmed" && new Date() < startDateTime),
     };
 
     // Add bike-specific details for multiple bikes
     if (booking.bikeItems && booking.bikeItems.length > 0) {
-      enhancedBooking.totalBikes = booking.bikeItems.reduce((sum, item) => sum + item.quantity, 0);
+      enhancedBooking.totalBikes = booking.bikeItems.reduce(
+        (sum, item) => sum + item.quantity,
+        0
+      );
       enhancedBooking.bikeTypes = booking.bikeItems.length;
-      enhancedBooking.bikeItemsWithDetails = booking.bikeItems.map(item => ({
+      enhancedBooking.bikeItemsWithDetails = booking.bikeItems.map((item) => ({
         ...item.toObject(),
-        bike: item.bike ? {
-          ...item.bike.toObject(),
-          currentAvailability: item.bike.availableQuantity,
-          isHighDemand: item.bike.availableQuantity < 3,
-          hasSpecialPricing: item.bike.specialPricing && item.bike.specialPricing.length > 0,
-        } : null
+        bike: item.bike
+          ? {
+              ...item.bike.toObject(),
+              currentAvailability: item.bike.availableQuantity,
+              isHighDemand: item.bike.availableQuantity < 3,
+              hasSpecialPricing:
+                item.bike.specialPricing && item.bike.specialPricing.length > 0,
+            }
+          : null,
       }));
     }
 
@@ -701,7 +734,8 @@ export const getBooking = asyncHandler(async (req, res) => {
         ...booking.bike.toObject(),
         currentAvailability: booking.bike.availableQuantity,
         isHighDemand: booking.bike.availableQuantity < 3,
-        hasSpecialPricing: booking.bike.specialPricing && booking.bike.specialPricing.length > 0,
+        hasSpecialPricing:
+          booking.bike.specialPricing && booking.bike.specialPricing.length > 0,
       };
     }
   }
@@ -710,18 +744,23 @@ export const getBooking = asyncHandler(async (req, res) => {
   if (booking.bookingType === "hotel") {
     const checkInDate = new Date(booking.startDate);
     const checkOutDate = new Date(booking.endDate);
-    const nightsStayed = Math.ceil((checkOutDate - checkInDate) / (1000 * 60 * 60 * 24));
+    const nightsStayed = Math.ceil(
+      (checkOutDate - checkInDate) / (1000 * 60 * 60 * 24)
+    );
 
     enhancedBooking.computedDetails = {
       nightsStayed,
-      canCancel: booking.bookingStatus === "pending" || (booking.bookingStatus === "confirmed" && new Date() < checkInDate),
-      canModify: booking.bookingStatus === "confirmed" && new Date() < checkInDate,
+      canCancel:
+        booking.bookingStatus === "pending" ||
+        (booking.bookingStatus === "confirmed" && new Date() < checkInDate),
+      canModify:
+        booking.bookingStatus === "confirmed" && new Date() < checkInDate,
     };
 
     // Calculate total rooms booked
     if (booking.hotelDetails && booking.hotelDetails.roomOptions) {
       const roomOptions = booking.hotelDetails.roomOptions;
-      enhancedBooking.totalRooms = 
+      enhancedBooking.totalRooms =
         (roomOptions.bedOnly?.quantity || 0) +
         (roomOptions.bedAndBreakfast?.quantity || 0) +
         (roomOptions.bedBreakfastAndDinner?.quantity || 0);
@@ -730,34 +769,38 @@ export const getBooking = asyncHandler(async (req, res) => {
 
   // Add payment and status information
   enhancedBooking.statusInfo = {
-    canMakePayment: booking.paymentStatus === "pending" && booking.bookingStatus === "pending",
+    canMakePayment:
+      booking.paymentStatus === "pending" &&
+      booking.bookingStatus === "pending",
     isPaymentCompleted: booking.paymentStatus === "completed",
     isBookingActive: booking.bookingStatus === "confirmed",
     isBookingCompleted: booking.bookingStatus === "completed",
-    isCancellable: booking.bookingStatus === "pending" || booking.bookingStatus === "confirmed",
+    isCancellable:
+      booking.bookingStatus === "pending" ||
+      booking.bookingStatus === "confirmed",
   };
 
   // Add formatted dates for frontend display
   enhancedBooking.formattedDates = {
-    startDate: booking.startDate.toLocaleDateString('en-IN', {
-      weekday: 'short',
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric'
+    startDate: booking.startDate.toLocaleDateString("en-IN", {
+      weekday: "short",
+      year: "numeric",
+      month: "short",
+      day: "numeric",
     }),
-    endDate: booking.endDate.toLocaleDateString('en-IN', {
-      weekday: 'short',
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric'
+    endDate: booking.endDate.toLocaleDateString("en-IN", {
+      weekday: "short",
+      year: "numeric",
+      month: "short",
+      day: "numeric",
     }),
-    createdAt: booking.createdAt.toLocaleDateString('en-IN', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    })
+    createdAt: booking.createdAt.toLocaleDateString("en-IN", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }),
   };
 
   res.status(200).json({
