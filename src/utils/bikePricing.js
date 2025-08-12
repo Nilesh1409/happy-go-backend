@@ -72,6 +72,7 @@ function getSpecialPricing(bike, startDate, endDate, kmOption) {
       const pricingOption =
         special.pricing?.[kmOption === "limited" ? "limitedKm" : "unlimited"];
 
+      // Return special pricing only if the requested km option is active and has a price
       if (pricingOption?.isActive && pricingOption?.price) {
         return {
           price: pricingOption.price,
@@ -79,6 +80,10 @@ function getSpecialPricing(bike, startDate, endDate, kmOption) {
           name: special.name,
         };
       }
+      
+      // If we found an active special period but the km option is not available,
+      // we should not fall back to regular pricing - return null and let the caller handle it
+      return null;
     }
   }
 
@@ -196,17 +201,39 @@ export async function calculateRentalPricing({
   // Check for special pricing first
   const specialPricing = getSpecialPricing(bike, startDate, endDate, kmOption);
   let selectedOption = null;
+  let isSpecialPricingPeriod = false;
 
   if (specialPricing) {
-    // Use special pricing
+    // Special pricing period is active - use special pricing only
     selectedOption = {
       price: specialPricing.price,
       kmLimit: specialPricing.kmLimit,
       isActive: true,
     };
     breakdown.specialPricing = specialPricing.name;
+    isSpecialPricingPeriod = true;
   } else {
-    // Use regular weekday/weekend pricing
+    // Check if we're in a special pricing period but the requested km option is inactive
+    const hasActiveSpecialPeriod = bike.specialPricing?.some(special => {
+      if (!special.isActive) return false;
+      
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      const specialStart = new Date(special.startDate);
+      const specialEnd = new Date(special.endDate);
+      
+      // Check if booking period overlaps with special period
+      return start <= specialEnd && end >= specialStart;
+    });
+    
+    if (hasActiveSpecialPeriod) {
+      // We're in a special pricing period but the requested km option is not available
+      throw new Error(
+        `${kmOption} km option is not available during special pricing period. Special pricing has priority over regular pricing.`
+      );
+    }
+    
+    // Use regular weekday/weekend pricing only if no special pricing period is active
     const pricingCategory = isWeekendBooking ? "weekend" : "weekday";
     selectedOption =
       bike.pricePerDay?.[pricingCategory]?.[
@@ -215,7 +242,7 @@ export async function calculateRentalPricing({
   }
 
   if (!selectedOption?.isActive || !selectedOption?.price) {
-    const pricingType = specialPricing
+    const pricingType = isSpecialPricingPeriod
       ? "special date"
       : isWeekendBooking
       ? "weekend"

@@ -381,6 +381,10 @@ export const addToCart = asyncHandler(async (req, res) => {
     }
 
     cart.items[existingItemIndex].quantity = newQuantity;
+    
+    // Auto-increase helmet count when adding more bikes (1 helmet per bike)
+    cart.helmetDetails.quantity += quantity;
+    console.log(`🪖 Auto-increased helmet count by ${quantity} (total: ${cart.helmetDetails.quantity})`);
   } else {
     // Add new item
     cart.items.push({
@@ -390,6 +394,10 @@ export const addToCart = asyncHandler(async (req, res) => {
       pricePerUnit: 0, // Will be calculated
       totalPrice: 0, // Will be calculated
     });
+    
+    // Auto-increase helmet count for new bikes (1 helmet per bike)
+    cart.helmetDetails.quantity += quantity;
+    console.log(`🪖 Auto-increased helmet count by ${quantity} for new item (total: ${cart.helmetDetails.quantity})`);
   }
 
   // Recalculate pricing
@@ -445,15 +453,19 @@ export const addToCart = asyncHandler(async (req, res) => {
 
   await cart.save();
 
+  // Prepare response message
+  let message = quantity > 1 ? `Added ${quantity} bikes to cart` : "Added bike to cart";
+  message += `. Added ${quantity} helmet${quantity > 1 ? 's' : ''} automatically.`;
+
   res.status(200).json({
     success: true,
     data: cart,
-    message:
-      quantity > 1 ? `Added ${quantity} bikes to cart` : "Added bike to cart",
+    message: message,
     savings:
       pricing.savings > 0
         ? `You saved ₹${pricing.savings.toFixed(2)} with bulk booking!`
         : null,
+    helmetAutoAdded: quantity,
   });
 });
 
@@ -503,7 +515,17 @@ export const updateCartItem = asyncHandler(async (req, res) => {
     );
   }
 
+  // Store old quantity to check if we need to increase helmets
+  const oldQuantity = item.quantity;
   item.quantity = quantity;
+
+  // Auto-increase helmet count when bike quantity increases (1 helmet per bike)
+  // But don't auto-decrease when bike quantity decreases
+  if (quantity > oldQuantity) {
+    const quantityIncrease = quantity - oldQuantity;
+    cart.helmetDetails.quantity += quantityIncrease;
+    console.log(`🪖 Auto-increased helmet count by ${quantityIncrease} (total: ${cart.helmetDetails.quantity})`);
+  }
 
   // Recalculate pricing
   const pricing = await calculateCartPricing({
@@ -543,14 +565,22 @@ export const updateCartItem = asyncHandler(async (req, res) => {
 
   await cart.save();
 
+  // Prepare response message
+  let message = "Cart updated successfully";
+  if (quantity > oldQuantity) {
+    const quantityIncrease = quantity - oldQuantity;
+    message += `. Added ${quantityIncrease} helmet${quantityIncrease > 1 ? 's' : ''} automatically.`;
+  }
+
   res.status(200).json({
     success: true,
     data: cart,
-    message: "Cart updated successfully",
+    message: message,
     savings:
       pricing.savings > 0
         ? `You saved ₹${pricing.savings.toFixed(2)} with bulk booking!`
         : null,
+    helmetAutoAdded: quantity > oldQuantity ? quantity - oldQuantity : 0,
   });
 });
 
