@@ -53,8 +53,9 @@ export const protect = asyncHandler(async (req, res, next) => {
       return next();
     }
 
-    // If neither user nor employee found
-    return next(new ApiError("User not found", 404));
+    // If neither user nor employee found - this means the JWT token is valid but the user/employee was deleted
+    console.error(`Authentication failed: User/Employee with ID ${decoded.id} not found in database. The account may have been deleted.`);
+    return next(new ApiError("Account not found. Your account may have been deleted. Please contact support or register again.", 404));
   } catch (error) {
     console.error("Token verification error:", error.message);
     return next(new ApiError("Authentication failed", 401));
