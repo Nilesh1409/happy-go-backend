@@ -16,6 +16,11 @@ export const getCart = asyncHandler(async (req, res) => {
     throw new ApiError("Please provide booking dates and times", 400);
   }
 
+  // Validate user exists
+  if (!req.user || !req.user._id) {
+    throw new ApiError("User authentication failed. Please login again.", 401);
+  }
+
   let cart = await Cart.findOne({
     user: req.user._id,
     isActive: true,
@@ -340,6 +345,11 @@ export const addToCart = asyncHandler(async (req, res) => {
     );
   }
 
+  // Validate user exists
+  if (!req.user || !req.user._id) {
+    throw new ApiError("User authentication failed. Please login again.", 401);
+  }
+
   // Get or create cart
   let cart = await Cart.findOne({
     user: req.user._id,
@@ -480,6 +490,11 @@ export const updateCartItem = asyncHandler(async (req, res) => {
     throw new ApiError("Quantity must be between 1 and 10", 400);
   }
 
+  // Validate user exists
+  if (!req.user || !req.user._id) {
+    throw new ApiError("User authentication failed. Please login again.", 401);
+  }
+
   const cart = await Cart.findOne({
     user: req.user._id,
     isActive: true,
@@ -590,6 +605,11 @@ export const updateCartItem = asyncHandler(async (req, res) => {
 export const removeFromCart = asyncHandler(async (req, res) => {
   const { itemId } = req.params;
 
+  // Validate user exists
+  if (!req.user || !req.user._id) {
+    throw new ApiError("User authentication failed. Please login again.", 401);
+  }
+
   const cart = await Cart.findOne({
     user: req.user._id,
     isActive: true,
@@ -672,6 +692,11 @@ export const updateHelmetQuantity = asyncHandler(async (req, res) => {
 
   if (quantity < 0 || quantity > 20) {
     throw new ApiError("Helmet quantity must be between 0 and 20", 400);
+  }
+
+  // Validate user exists
+  if (!req.user || !req.user._id) {
+    throw new ApiError("User authentication failed. Please login again.", 401);
   }
 
   // Build query to find the specific cart
@@ -829,6 +854,11 @@ export const updateHelmetQuantity = asyncHandler(async (req, res) => {
 // @route   DELETE /api/cart
 // @access  Private
 export const clearCart = asyncHandler(async (req, res) => {
+  // Validate user exists
+  if (!req.user || !req.user._id) {
+    throw new ApiError("User authentication failed. Please login again.", 401);
+  }
+
   await Cart.findOneAndUpdate(
     { user: req.user._id, isActive: true },
     { isActive: false }
