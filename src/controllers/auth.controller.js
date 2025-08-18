@@ -112,13 +112,7 @@ export const registerUser = asyncHandler(async (req, res) => {
           Your account has been created successfully! We've sent an OTP to your mobile number for verification.
         </p>
         
-        // <div style="background-color: #E3F2FD; border-radius: 6px; padding: 15px; margin: 15px 0; text-align: center;">
-        //   <p style="color: #1976D2; margin: 0 0 10px 0; font-weight: bold;">Your Mobile Verification OTP:</p>
-        //   <div style="background-color: white; border: 2px solid #1976D2; border-radius: 6px; padding: 10px; display: inline-block;">
-        //     <span style="font-family: monospace; font-size: 24px; font-weight: bold; letter-spacing: 4px; color: #1976D2;">${mobileOTP}</span>
-        //   </div>
-        //   <p style="color: #1565C0; margin: 10px 0 0 0; font-size: 12px;">This OTP expires in 10 minutes</p>
-        // </div>
+
 
         <div style="text-align: center; margin: 25px 0;">
           <a href="${verificationURL}" 
