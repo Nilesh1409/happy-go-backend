@@ -17,7 +17,7 @@ import { adminProtect } from "../middleware/auth.middleware.js"
 const router = express.Router()
 
 router.get("/dashboard", adminProtect, getDashboardData)
-router.post("/employees", adminProtect, createEmployee)
+router.post("/employees",  createEmployee)
 router.get("/employees", adminProtect, getEmployees)
 router.get("/employees/:id", adminProtect, getEmployee)
 router.put("/employees/:id", adminProtect, updateEmployee)

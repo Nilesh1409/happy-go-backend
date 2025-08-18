@@ -53,7 +53,7 @@ const employeeSchema = new mongoose.Schema(
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      required: true,
+      required: false,
     },
     // Added fields for OTP-based authentication
     mobileVerificationOTP: {
