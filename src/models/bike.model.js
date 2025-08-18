@@ -154,8 +154,8 @@ const bikeSchema = new mongoose.Schema(
     registrationNumber: {
       type: String,
       required: false,
-      unique: false,
-      sparse: true, // Allows multiple documents with null/undefined values
+      default: null,
+      trim: true,
     },
     location: {
       type: String,
@@ -260,9 +260,6 @@ bikeSchema.virtual("bookings", {
 
 // Create index for search
 bikeSchema.index({ title: "text", brand: "text", model: "text" });
-
-// Create sparse unique index for registrationNumber (allows multiple null values)
-bikeSchema.index({ registrationNumber: 1 }, { sparse: true, unique: true });
 
 const Bike = mongoose.model("Bike", bikeSchema);
 

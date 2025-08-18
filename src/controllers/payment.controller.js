@@ -10,11 +10,14 @@ import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 // Initialize Razorpay
 const razorpay = new Razorpay({
-  key_id: process.env.RAZORPAY_KEY_ID || "rzp_test_B2oNl52RAg8PRk",
-  key_secret: process.env.RAZORPAY_KEY_SECRET || "s1ley2lszg0KQXBaYizEV3bp",
+  key_id: process.env.RAZORPAY_KEY_ID || "",
+  key_secret: process.env.RAZORPAY_KEY_SECRET || "",
 });
 
 // function fillTemplate(templatePath, variables) {
