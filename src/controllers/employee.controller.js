@@ -577,7 +577,11 @@ export const getEmployeeBookingById = asyncHandler(async (req, res) => {
   const booking = await Booking.findById(req.params.id)
     .populate({
       path: "bike",
-      select: "title brand model images registrationNumber pricePerDay",
+      select: "title brand model images registrationNumber pricePerDay quantity availableQuantity location features termsAndConditions additionalKmPrice",
+    })
+    .populate({
+      path: "bikeItems.bike",
+      select: "title brand model images registrationNumber pricePerDay quantity availableQuantity location features termsAndConditions additionalKmPrice",
     })
     .populate({
       path: "hotel",
@@ -623,25 +627,67 @@ export const getEmployeeBookingById = asyncHandler(async (req, res) => {
   };
 
   // Add type-specific details
-  if (booking.bookingType === "bike" && booking.bike) {
+  if (booking.bookingType === "bike") {
     const duration = Math.ceil(
       (new Date(booking.endDate) - new Date(booking.startDate)) /
         (1000 * 60 * 60 * 24)
     );
 
-    formattedBooking.bike = {
-      name: `${booking.bike.brand} ${booking.bike.model}`,
-      model: booking.bike.model,
-      image:
-        booking.bike.images && booking.bike.images.length > 0
-          ? booking.bike.images[0]
-          : "",
-      registrationNumber: booking.bike.registrationNumber,
-      pricePerDay: booking.bike.pricePerDay.limitedKm.price,
-    };
-
     formattedBooking.duration = duration;
 
+    // Handle multiple bike bookings (new format)
+    if (booking.bikeItems && booking.bikeItems.length > 0) {
+      formattedBooking.totalBikes = booking.bikeItems.reduce(
+        (sum, item) => sum + item.quantity,
+        0
+      );
+      formattedBooking.bikeTypes = booking.bikeItems.length;
+      
+      formattedBooking.bikeItems = booking.bikeItems.map((item) => ({
+        bike: {
+          id: item.bike._id,
+          name: `${item.bike.brand} ${item.bike.model}`,
+          title: item.bike.title,
+          brand: item.bike.brand,
+          model: item.bike.model,
+          image: item.bike.images && item.bike.images.length > 0 ? item.bike.images[0] : "",
+          registrationNumber: item.bike.registrationNumber,
+          location: item.bike.location,
+          features: item.bike.features,
+          additionalKmPrice: item.bike.additionalKmPrice,
+        },
+        quantity: item.quantity,
+        kmOption: item.kmOption,
+        pricePerUnit: item.pricePerUnit,
+        totalPrice: item.totalPrice,
+        kmLimit: item.kmLimit,
+        additionalKmPrice: item.additionalKmPrice,
+        bikeUnits: item.bikeUnits || [],
+      }));
+    }
+    // Handle single bike bookings (legacy format)
+    else if (booking.bike) {
+      formattedBooking.bike = {
+        id: booking.bike._id,
+        name: `${booking.bike.brand} ${booking.bike.model}`,
+        title: booking.bike.title,
+        brand: booking.bike.brand,
+        model: booking.bike.model,
+        image: booking.bike.images && booking.bike.images.length > 0 ? booking.bike.images[0] : "",
+        registrationNumber: booking.bike.registrationNumber,
+        location: booking.bike.location,
+        features: booking.bike.features,
+        additionalKmPrice: booking.bike.additionalKmPrice,
+        pricePerDay: booking.bike.pricePerDay,
+      };
+      
+      // For single bike, quantity is typically 1 but can be found in bikeDetails
+      formattedBooking.quantity = 1;
+      formattedBooking.totalBikes = 1;
+      formattedBooking.bikeTypes = 1;
+    }
+
+    // Add bike details if available
     if (booking.bikeDetails) {
       formattedBooking.kmLimit = booking.bikeDetails.kmLimit;
       formattedBooking.isUnlimited = booking.bikeDetails.isUnlimited;
@@ -649,8 +695,7 @@ export const getEmployeeBookingById = asyncHandler(async (req, res) => {
       formattedBooking.finalKmReading = booking.bikeDetails.finalKmReading;
 
       if (booking.bikeDetails.additionalCharges) {
-        formattedBooking.additionalCharges =
-          booking.bikeDetails.additionalCharges;
+        formattedBooking.additionalCharges = booking.bikeDetails.additionalCharges;
       }
     }
   } else if (booking.bookingType === "hotel" && booking.hotel) {
