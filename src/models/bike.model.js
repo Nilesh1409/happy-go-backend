@@ -184,7 +184,7 @@ const bikeSchema = new mongoose.Schema(
       type: Number,
       required: [true, "Please add quantity"],
       default: 1,
-      min: [1, "Quantity must be at least 1"],
+      min: [0, "Quantity cannot be negative"],
     },
     availableQuantity: {
       type: Number,
