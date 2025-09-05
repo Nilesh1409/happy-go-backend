@@ -687,6 +687,15 @@ export const getEmployeeBookingById = asyncHandler(async (req, res) => {
       formattedBooking.bikeTypes = 1;
     }
 
+    // Add helmet details
+    const helmetQuantity = booking.helmetDetails?.quantity || booking.bikeDetails?.helmetQuantity || 0;
+    const helmetCharges = booking.helmetDetails?.charges || booking.bikeDetails?.helmetCharges || booking.priceDetails?.helmetCharges || 0;
+    
+    formattedBooking.helmetDetails = {
+      quantity: helmetQuantity,
+      charges: helmetCharges,
+    };
+
     // Add bike details if available
     if (booking.bikeDetails) {
       formattedBooking.kmLimit = booking.bikeDetails.kmLimit;
