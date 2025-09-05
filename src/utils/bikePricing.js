@@ -103,7 +103,7 @@ async function getSurgeMultiplier(startDate, endDate) {
       {
         $match: {
           bookingType: "bike",
-          bookingStatus: { $in: ["confirmed", "pending"] },
+          bookingStatus: { $in: ["confirmed",] },
           startDate: { $lte: end },
           endDate: { $gte: start },
         },
@@ -120,6 +120,7 @@ async function getSurgeMultiplier(startDate, endDate) {
     ]);
 
     const totalBikes = totalBookings[0]?.totalQuantity || 0;
+    console.log("totalBikes", totalBikes);
 
     // Apply surge pricing - 5% increase for every 5 bookings
     if (totalBikes >= 5) {
