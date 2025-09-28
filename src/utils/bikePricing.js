@@ -289,7 +289,7 @@ export async function calculateRentalPricing({
   breakdown.extraCharges = extraCharges;
 
   // Calculate subtotal before discounts
-  const subtotal = roundToTwo(basePrice + extraCharges);
+  const subtotal = roundToTwo(basePrice);
   breakdown.subtotal = subtotal;
 
   // Calculate bulk discount
@@ -409,17 +409,23 @@ export async function calculateCartPricing({
   const { default: Helmet } = await import("../models/helmet.model.js");
   let helmetCharges = 0;
   let helmetMessage = "";
+  
+  // Calculate rental days
+  const startDateOnly = new Date(startDate);
+  const endDateOnly = new Date(endDate);
+  const rentalDays = Math.ceil((endDateOnly - startDateOnly) / (1000 * 60 * 60 * 24)) + 1;
+  
   if (helmetQuantity > 0) {
     const helmet = await Helmet.findOne({ isActive: true });
     if (helmet) {
       // Give 1 free helmet per bike booked
       const freeHelmets = totalQuantity;
       const chargeableHelmets = Math.max(0, helmetQuantity - freeHelmets);
-      helmetCharges = roundToTwo(chargeableHelmets * helmet.pricePerHelmet);
+      helmetCharges = roundToTwo(chargeableHelmets * helmet.pricePerHelmet * rentalDays);
 
       // Create informative message
       if (chargeableHelmets > 0) {
-        helmetMessage = `${freeHelmets} helmet(s) free (1 per bike), ${chargeableHelmets} additional helmet(s) charged at ₹${helmet.pricePerHelmet} each`;
+        helmetMessage = `${freeHelmets} helmet(s) free (1 per bike), ${chargeableHelmets} additional helmet(s) charged at ₹${helmet.pricePerHelmet} per day for ${rentalDays} day(s)`;
       } else {
         helmetMessage = `${helmetQuantity} helmet(s) free (1 per bike included)`;
       }
