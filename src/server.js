@@ -25,6 +25,7 @@ import uploadRoutes from "./routes/upload.routes.js";
 import simpleUploadRoutes from "./routes/simpleUpload.routes.js";
 import fileUploadRoutes from "./routes/fileUpload.routes.js";
 import aadhaarRoutes from "./routes/aadhaar.routes.js";
+import cartRoutes from "./routes/cart.routes.js";
 
 // Middleware
 import { errorHandler } from "./middleware/error.middleware.js";
@@ -46,7 +47,7 @@ app.use(morgan("dev"));
 // Rate limiting
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
+  max: 10000, // limit each IP to 10000 requests per windowMs
   standardHeaders: true,
   legacyHeaders: false,
 });
@@ -54,7 +55,7 @@ app.use("/api", apiLimiter);
 
 // Serve static files from uploads directory
 app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
-console.log("test CI/CD test")
+console.log("test CI/CD test");
 // Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
@@ -69,8 +70,9 @@ app.use("/api/payments", paymentRoutes);
 app.use("/api/places", placeRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/upload", uploadRoutes);
+app.use("/api/cart", cartRoutes);
 // app.use("/api/simple-upload", simpleUploadRoutes);
-app.use("/api/file-upload", fileUploadRoutes);
+app.use("/api/simple-upload", fileUploadRoutes);
 app.use("/api/verification/aadhaar", aadhaarRoutes);
 
 // Error handling
@@ -78,6 +80,7 @@ app.use(notFound);
 app.use(errorHandler);
 
 // Database connection
+console.log("process.env.MONGODB_URI",process.env.MONGODB_URI);
 mongoose
   .connect(process.env.MONGODB_URI)
   .then(() => {

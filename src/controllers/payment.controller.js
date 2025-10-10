@@ -10,11 +10,14 @@ import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 // Initialize Razorpay
 const razorpay = new Razorpay({
-  key_id: process.env.RAZORPAY_KEY_ID || "rzp_test_B2oNl52RAg8PRk",
-  key_secret: process.env.RAZORPAY_KEY_SECRET || "s1ley2lszg0KQXBaYizEV3bp",
+  key_id: process.env.RAZORPAY_KEY_ID || "",
+  key_secret: process.env.RAZORPAY_KEY_SECRET || "",
 });
 
 // function fillTemplate(templatePath, variables) {
@@ -110,7 +113,7 @@ export const createBookingPayment = asyncHandler(async (req, res) => {
 
   // Create Razorpay order
   const options = {
-    amount: booking.priceDetails.totalAmount * 100, // amount in smallest currency unit (paise)
+    amount: Math.round(booking.priceDetails.totalAmount * 100), // amount in smallest currency unit (paise) - must be integer
     currency: "INR",
     receipt: `booking_${booking._id}`,
     payment_capture: 1, // auto capture
@@ -165,7 +168,7 @@ export const createExtendBookingPayment = asyncHandler(async (req, res) => {
 
   // 6. Create a Razorpay order for exactly that extra amount
   const razorpayOptions = {
-    amount: additionalAmount * 100, // in paise (₹ → paise)
+    amount: Math.round(additionalAmount * 100), // in paise (₹ → paise) - must be integer
     currency: "INR",
     receipt: `extension_${booking._id}_${Date.now()}`, // e.g. extension_60f0b0a1d48abc1234567890_1627672800000
     payment_capture: 1, // auto capture
@@ -228,7 +231,7 @@ export const createOrderPayment = asyncHandler(async (req, res) => {
       message: "Development mode: Payment automatically marked as completed",
       data: {
         id: "mock_order_" + Date.now(),
-        amount: order.priceDetails.totalAmount * 100,
+        amount: Math.round(order.priceDetails.totalAmount * 100),
         currency: "INR",
         receipt: `order_${order._id}`,
         orderId: order._id,
@@ -255,7 +258,7 @@ export const createOrderPayment = asyncHandler(async (req, res) => {
       message: "Development mode: Payment automatically marked as completed",
       data: {
         id: "mock_order_" + Date.now(),
-        amount: order.priceDetails.totalAmount * 100,
+        amount: Math.round(order.priceDetails.totalAmount * 100),
         currency: "INR",
         receipt: `order_${order._id}`,
         orderId: order._id,
@@ -265,7 +268,7 @@ export const createOrderPayment = asyncHandler(async (req, res) => {
 
   // Create Razorpay order
   const options = {
-    amount: order.priceDetails.totalAmount * 100, // amount in smallest currency unit (paise)
+    amount: Math.round(order.priceDetails.totalAmount * 100), // amount in smallest currency unit (paise) - must be integer
     currency: "INR",
     receipt: `order_${order._id}`,
     payment_capture: 1, // auto capture
@@ -306,7 +309,8 @@ export const verifyBookingPayment = asyncHandler(async (req, res) => {
   // Get booking with bike details populated
   const booking = await Booking.findById(req.params.id)
     .populate("user")
-    .populate("bike"); // This will populate the actual bike details
+    .populate("bike")
+    .populate("bikeItems.bike"); // This will populate bike details for multiple bikes
 
   if (!booking) throw new ApiError("Booking not found", 404);
 
@@ -328,6 +332,91 @@ export const verifyBookingPayment = asyncHandler(async (req, res) => {
   // Calculate total days
   const totalDays = calculateDays(booking.startDate, booking.endDate);
 
+  // Process bike data for template
+  let bikeDetailsHtml = "";
+  let totalBikes = 1;
+  let bikeTypes = 1;
+
+  if (booking.bikeItems && booking.bikeItems.length > 0) {
+    // Multiple bikes
+    totalBikes = booking.bikeItems.reduce(
+      (sum, item) => sum + item.quantity,
+      0
+    );
+    bikeTypes = booking.bikeItems.length;
+
+    bikeDetailsHtml = booking.bikeItems
+      .map((item) => {
+        const bike = item.bike || {};
+        const kmType =
+          item.kmOption === "unlimited"
+            ? "Unlimited KM"
+            : `Limited KM (${item.kmLimit || 60} km/day)`;
+
+        return `
+        <div class="bike-card" style="margin-bottom: 16px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; text-align: center;">
+          <div class="bike-title" style="font-size: 20px; font-weight: 600; margin-bottom: 8px;">${
+            bike.title || "Bike"
+          }</div>
+          <div class="bike-details" style="font-size: 16px; color: #64748b;">
+            ${bike.brand || ""} ${bike.model || ""} ${
+          bike.year ? `| ${bike.year}` : ""
+        }
+          </div>
+          <div style="margin-top: 8px;">
+            <span style="background: #f47b20; color: white; padding: 4px 8px; border-radius: 4px; font-size: 12px; margin-right: 8px;">
+              ${item.quantity} Bike${item.quantity > 1 ? "s" : ""}
+            </span>
+            <span style="background: #e2e8f0; color: #64748b; padding: 4px 8px; border-radius: 4px; font-size: 12px;">
+              ${kmType}
+            </span>
+          </div>
+          ${
+            bike.registrationNumber
+              ? `<div style="margin-top: 8px; font-size: 14px; color: #64748b;">Registration: ${bike.registrationNumber}</div>`
+              : ""
+          }
+        </div>
+      `;
+      })
+      .join("");
+
+    bikeDetailsHtml += `
+      <div style="text-align: center; margin-top: 16px; padding: 12px; background: #f8fafc; border-radius: 8px; font-weight: 600; border: 2px solid #f47b20;">
+        Total: ${totalBikes} Bike${
+      totalBikes > 1 ? "s" : ""
+    } | ${bikeTypes} Type${bikeTypes > 1 ? "s" : ""}
+      </div>
+    `;
+  } else {
+    // Single bike
+    const packageType = bikeDetails.isUnlimited
+      ? "Unlimited KM Package"
+      : `Limited KM Package (${bikeDetails.kmLimit || 60} km/day)`;
+    bikeDetailsHtml = `
+      <div class="bike-card" style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; text-align: center;">
+        <div class="bike-title" style="font-size: 20px; font-weight: 600; margin-bottom: 8px;">${
+          bikeInfo.title || "Bike"
+        }</div>
+        <div class="bike-details" style="font-size: 16px; color: #64748b;">
+          ${bikeInfo.brand || ""} ${bikeInfo.model || ""} ${
+      bikeInfo.year ? `| ${bikeInfo.year}` : ""
+    }
+        </div>
+        <div style="margin-top: 8px;">
+          <span style="background: #e2e8f0; color: #64748b; padding: 4px 8px; border-radius: 4px; font-size: 12px;">
+            ${packageType}
+          </span>
+        </div>
+        ${
+          bikeInfo.registrationNumber
+            ? `<div style="margin-top: 8px; font-size: 14px; color: #64748b;">Registration: ${bikeInfo.registrationNumber}</div>`
+            : ""
+        }
+      </div>
+    `;
+  }
+
   const variables = {
     // Customer Information
     customerName: user.name || "",
@@ -343,7 +432,12 @@ export const verifyBookingPayment = asyncHandler(async (req, res) => {
       year: "numeric",
     }),
 
-    // Bike Information (from populated bike document)
+    // Bike Information - processed HTML
+    bikeDetailsHtml: bikeDetailsHtml,
+    totalBikes: totalBikes.toString(),
+    bikeTypes: bikeTypes.toString(),
+
+    // Single Bike Information (fallback for legacy bookings)
     bikeTitle: bikeInfo.title || bikeInfo.name || "Bike",
     bikeBrand: bikeInfo.brand || "",
     bikeModel: bikeInfo.model || "",
@@ -358,81 +452,82 @@ export const verifyBookingPayment = asyncHandler(async (req, res) => {
     totalDays: totalDays.toString(),
 
     // Price Details (mapping to your actual structure)
-    baseAmount: price.basePrice || "",
-    taxAmount: price.taxes || "",
-    gstAmount: price.taxes || "", // Using taxes as GST
+    baseAmount: price.basePrice || "0",
+    taxAmount: price.taxes || "0",
+    gstAmount: price.taxes || "0", // Using taxes as GST
     discountAmount: price.discount || "",
     additionalCharges: bikeDetails.additionalCharges?.amount || "",
-    helmetCharges: "", // Not in your structure, keeping empty
+    helmetCharges: price.helmetCharges || "0",
     securityDeposit: "", // Not in your structure, keeping empty
-    totalAmount: price.totalAmount || "",
+    totalAmount: price.totalAmount || "0",
 
-    // Package Information
+    // Conditional pricing rows HTML
+    helmetChargesRow:
+      price.helmetCharges && price.helmetCharges !== "0"
+        ? `
+      <tr class="row">
+        <td class="label">Helmet Rental</td>
+        <td class="value">₹${price.helmetCharges}</td>
+      </tr>
+    `
+        : "",
+    discountRow:
+      price.discount && price.discount !== "0"
+        ? `
+      <tr class="row">
+        <td class="label">Discount Applied</td>
+        <td class="value" style="color: #16a34a">-₹${price.discount}</td>
+      </tr>
+    `
+        : "",
+    securityDepositRow: "", // Always empty for now
+
+    // Package Information (for single bike)
     packageType: bikeDetails.isUnlimited
-      ? "Unlimited"
-      : `${bikeDetails.kmLimit} KM`,
+      ? "Unlimited KM"
+      : `Limited KM (${bikeDetails.kmLimit || 60} km/day)`,
 
     // URLs
     bookingUrl: `${
-      process.env.FRONTEND_URL || "https://happygorentals.com"
-    }/bookings/${booking._id}`,
-    websiteUrl: process.env.FRONTEND_URL || "https://happygorentals.com",
+      process.env.FRONTEND_URL || "https://happygobikes.netlify.app"
+    }/booking/confirmed/${booking._id}`,
+    websiteUrl: process.env.FRONTEND_URL || "https://happygobikes.netlify.app",
     bookingsUrl: `${
-      process.env.FRONTEND_URL || "https://happygorentals.com"
-    }/my-bookings`,
+      process.env.FRONTEND_URL || "https://happygobikes.netlify.app"
+    }/bookings`,
     supportUrl: `${
-      process.env.FRONTEND_URL || "https://happygorentals.com"
+      process.env.FRONTEND_URL || "https://happygobikes.netlify.app"
     }/support`,
     termsUrl: `${
-      process.env.FRONTEND_URL || "https://happygorentals.com"
+      process.env.FRONTEND_URL || "https://happygobikes.netlify.app"
     }/terms`,
     privacyUrl: `${
-      process.env.FRONTEND_URL || "https://happygorentals.com"
+      process.env.FRONTEND_URL || "https://happygobikes.netlify.app"
     }/privacy`,
     trackingUrl: `${
-      process.env.FRONTEND_URL || "https://happygorentals.com"
-    }/my-bookings/${booking._id}`,
+      process.env.FRONTEND_URL || "https://happygobikes.netlify.app"
+    }/bookings`,
   };
 
   console.log("🚀 ~ Email Variables:", variables);
 
   try {
-    // Paths to your HTML templates
-    const paymentTemplatePath = path.join(
-      __dirname,
-      "../templates/payment-confirmation-email.html"
-    );
+    // Path to booking confirmation template
     const bookingTemplatePath = path.join(
       __dirname,
       "../templates/booking-confirmation-email.html"
     );
 
-    // Check if template files exist
-    if (!fs.existsSync(paymentTemplatePath)) {
-      console.error("Payment template not found at:", paymentTemplatePath);
-      throw new ApiError("Payment email template not found", 500);
-    }
-
+    // Check if template file exists
     if (!fs.existsSync(bookingTemplatePath)) {
       console.error("Booking template not found at:", bookingTemplatePath);
       throw new ApiError("Booking email template not found", 500);
     }
 
-    // Fill templates
-    const paymentEmailHtml = fillTemplate(paymentTemplatePath, variables);
+    // Fill template
     const bookingEmailHtml = fillTemplate(bookingTemplatePath, variables);
 
-    // Send Payment Confirmation Email
-    await sendEmail({
-      email: user.email,
-      subject: "✅ Payment Confirmed - Happy Go Bike Rentals",
-      message: paymentEmailHtml,
-      isHtml: true,
-    });
-
-    console.log("✅ Payment confirmation email sent to:", user.email);
-
-    // Send Booking Confirmation Email
+    // Send Booking Confirmation Email only
     await sendEmail({
       email: user.email,
       subject: "🎉 Booking Confirmed - Happy Go Bike Rentals",
@@ -449,7 +544,7 @@ export const verifyBookingPayment = asyncHandler(async (req, res) => {
 
   res.status(200).json({
     success: true,
-    message: "Payment verified and confirmation emails sent",
+    message: "Payment verified and booking confirmation email sent",
     data: booking,
   });
 });

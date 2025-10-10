@@ -1,0 +1,247 @@
+{
+  "info": {
+    "name": "User Documents API Collection",
+    "description": "Complete collection of User Document APIs for Aadhaar and Driving License management",
+    "version": "1.0.0",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "BASE_URL",
+      "value": "http://localhost:5000/api",
+      "type": "string"
+    },
+    {
+      "key": "USER_TOKEN",
+      "value": "your_user_jwt_token_here",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "User Profile Management",
+      "item": [
+        {
+          "name": "Get User Profile",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{USER_TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{BASE_URL}}/users/profile",
+              "host": ["{{BASE_URL}}"],
+              "path": ["users", "profile"]
+            },
+            "description": "Get complete user profile with pre-signed URLs for documents"
+          }
+        },
+        {
+          "name": "Update User Profile",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{USER_TOKEN}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"John Doe Updated\",\n  \"email\": \"john.updated@example.com\",\n  \"profileImage\": \"https://example.com/new-profile-image.jpg\"\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/users/profile",
+              "host": ["{{BASE_URL}}"],
+              "path": ["users", "profile"]
+            },
+            "description": "Update user profile information"
+          }
+        },
+        {
+          "name": "Get Documents Status",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{USER_TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{BASE_URL}}/users/documents/status",
+              "host": ["{{BASE_URL}}"],
+              "path": ["users", "documents", "status"]
+            },
+            "description": "Get status of all user documents (Aadhaar and Driving License) with pre-signed URLs"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Aadhaar Management",
+      "item": [
+        {
+          "name": "Update Aadhaar Details (Complete)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{USER_TOKEN}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"aadhaarDetails\": {\n    \"ref_id\": \"123456789012\",\n    \"name\": \"John Doe\",\n    \"dob\": \"01-01-1990\",\n    \"gender\": \"M\",\n    \"care_of\": \"S/O Father Name\",\n    \"address\": \"123 Main Street, City, State 123456\",\n    \"split_address\": {\n      \"country\": \"India\",\n      \"state\": \"Karnataka\",\n      \"dist\": \"Bangalore Urban\",\n      \"house\": \"123\",\n      \"street\": \"Main Street\",\n      \"locality\": \"Koramangala\",\n      \"pincode\": 560034,\n      \"po\": \"Koramangala\",\n      \"subdist\": \"Bangalore South\",\n      \"vtc\": \"Bangalore\",\n      \"landmark\": \"Near Metro Station\"\n    },\n    \"year_of_birth\": 1990,\n    \"photo_link\": \"/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCdABmX/9k=\",\n    \"share_code\": \"1234\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/users/aadhaar",
+              "host": ["{{BASE_URL}}"],
+              "path": ["users", "aadhaar"]
+            },
+            "description": "Update complete Aadhaar details including encrypted number, personal info, and photo (base64)"
+          }
+        },
+        {
+          "name": "Upload Aadhaar Image Only",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{USER_TOKEN}}"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "aadhaarImage",
+                  "type": "file",
+                  "src": "path/to/your/aadhaar-image.jpg",
+                  "description": "Select Aadhaar card image (JPEG, PNG, WebP - Max 5MB)"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/users/aadhaar/image",
+              "host": ["{{BASE_URL}}"],
+              "path": ["users", "aadhaar", "image"]
+            },
+            "description": "Upload only Aadhaar image file (alternative to complete details update)"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Driving License Management",
+      "item": [
+        {
+          "name": "Upload Driving License Image",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{USER_TOKEN}}"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "dlImage",
+                  "type": "file",
+                  "src": "path/to/your/driving-license.jpg",
+                  "description": "Select driving license image (JPEG, PNG, WebP - Max 5MB)"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/users/dl-image",
+              "host": ["{{BASE_URL}}"],
+              "path": ["users", "dl-image"]
+            },
+            "description": "Upload driving license image"
+          }
+        },
+        {
+          "name": "Delete Driving License Image",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{USER_TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{BASE_URL}}/users/dl-image",
+              "host": ["{{BASE_URL}}"],
+              "path": ["users", "dl-image"]
+            },
+            "description": "Delete the uploaded driving license image"
+          }
+        }
+      ]
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{USER_TOKEN}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Pre-request script for document upload APIs",
+          "// You can add any setup logic here"
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Global test scripts for document APIs",
+          "pm.test('Status code is successful', function () {",
+          "    pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]);",
+          "});",
+          "",
+          "pm.test('Response has success field', function () {",
+          "    const jsonData = pm.response.json();",
+          "    pm.expect(jsonData).to.have.property('success');",
+          "    pm.expect(jsonData.success).to.be.true;",
+          "});",
+          "",
+          "pm.test('Response has data field', function () {",
+          "    const jsonData = pm.response.json();",
+          "    pm.expect(jsonData).to.have.property('data');",
+          "});"
+        ]
+      }
+    }
+  ]
+}
+

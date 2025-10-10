@@ -157,15 +157,15 @@ export const getOrder = asyncHandler(async (req, res) => {
   const order = await Order.findById(req.params.id)
     .populate({
       path: "products.product",
-      select: "title description images price",
+      select: "title description images price category stock isAvailable isBestseller ratings numReviews taxRate",
     })
     .populate({
       path: "user",
-      select: "name email mobile",
+      select: "name email mobile profilePicture",
     })
     .populate({
       path: "assignedEmployee",
-      select: "name email mobile",
+      select: "name email mobile role department",
     });
 
   if (!order) {
@@ -180,9 +180,93 @@ export const getOrder = asyncHandler(async (req, res) => {
     throw new ApiError("Not authorized to access this order", 401);
   }
 
+  // Add computed fields for better frontend usage
+  const enhancedOrder = order.toObject();
+
+  // Calculate order statistics
+  const totalProducts = enhancedOrder.products.reduce((sum, item) => sum + item.quantity, 0);
+  const uniqueProducts = enhancedOrder.products.length;
+
+  // Add enhanced product details
+  enhancedOrder.productsWithDetails = enhancedOrder.products.map(item => ({
+    ...item,
+    product: item.product ? {
+      ...item.product,
+      finalPrice: item.product.price.discountedPrice || item.product.price.basePrice,
+      discount: item.product.price.discountedPrice 
+        ? Math.round(((item.product.price.basePrice - item.product.price.discountedPrice) / item.product.price.basePrice) * 100)
+        : 0,
+      isDiscounted: Boolean(item.product.price.discountedPrice),
+      isLowStock: item.product.stock < 10,
+      isOutOfStock: item.product.stock === 0,
+      stockStatus: item.product.stock === 0 ? "Out of Stock" : 
+                   item.product.stock < 10 ? "Low Stock" : "In Stock",
+      totalValue: item.price * item.quantity,
+    } : null
+  }));
+
+  // Add computed order details
+  enhancedOrder.computedDetails = {
+    totalProducts,
+    uniqueProducts,
+    averageRating: enhancedOrder.products.reduce((sum, item) => 
+      sum + (item.product?.ratings || 0), 0) / uniqueProducts,
+    canCancel: enhancedOrder.orderStatus === "pending" || enhancedOrder.orderStatus === "processing",
+    canTrack: enhancedOrder.orderStatus === "shipped",
+    isDelivered: enhancedOrder.orderStatus === "delivered",
+    isCancelled: enhancedOrder.orderStatus === "cancelled",
+    estimatedDeliveryPassed: enhancedOrder.estimatedDeliveryDate && new Date() > new Date(enhancedOrder.estimatedDeliveryDate),
+  };
+
+  // Add status information
+  enhancedOrder.statusInfo = {
+    canMakePayment: enhancedOrder.paymentStatus === "pending" && enhancedOrder.orderStatus === "pending",
+    isPaymentCompleted: enhancedOrder.paymentStatus === "completed",
+    isOrderActive: ["processing", "shipped"].includes(enhancedOrder.orderStatus),
+    isOrderCompleted: enhancedOrder.orderStatus === "delivered",
+    canRequestRefund: enhancedOrder.orderStatus === "delivered" && enhancedOrder.paymentStatus === "completed",
+  };
+
+  // Add formatted dates for frontend display
+  enhancedOrder.formattedDates = {
+    orderDate: enhancedOrder.createdAt.toLocaleDateString('en-IN', {
+      weekday: 'short',
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    }),
+    estimatedDelivery: enhancedOrder.estimatedDeliveryDate 
+      ? new Date(enhancedOrder.estimatedDeliveryDate).toLocaleDateString('en-IN', {
+          weekday: 'short',
+          year: 'numeric',
+          month: 'short',
+          day: 'numeric'
+        })
+      : null,
+    actualDelivery: enhancedOrder.actualDeliveryDate 
+      ? new Date(enhancedOrder.actualDeliveryDate).toLocaleDateString('en-IN', {
+          weekday: 'short',
+          year: 'numeric',
+          month: 'short',
+          day: 'numeric'
+        })
+      : null,
+  };
+
+  // Add delivery tracking information
+  enhancedOrder.deliveryInfo = {
+    address: enhancedOrder.deliveryAddress,
+    hasCoordinates: Boolean(enhancedOrder.deliveryAddress.coordinates?.latitude),
+    isDeliveryPending: enhancedOrder.orderStatus === "shipped",
+    deliveryCharges: enhancedOrder.priceDetails.deliveryCharge,
+    isFreeDelivery: enhancedOrder.priceDetails.deliveryCharge === 0,
+  };
+
   res.status(200).json({
     success: true,
-    data: order,
+    data: enhancedOrder,
   });
 });
 

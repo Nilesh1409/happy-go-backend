@@ -6,16 +6,23 @@ import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import { sendEmail } from "../utils/sendEmail.js";
 import Helmet from "../models/helmet.model.js";
-import { calculateRentalPricing, calculateExtraAmount } from "../utils/bikePricing.js";
+import {
+  calculateRentalPricing,
+  calculateExtraAmount,
+} from "../utils/bikePricing.js";
 // const mongoose = require("mongoose");
 
-// @desc    Create new booking
+// @desc    Create new booking for single bike or multiple bikes
 // @route   POST /api/bookings
 // @access  Private
 export const createBooking = asyncHandler(async (req, res) => {
   const {
     bookingType,
+    // Single bike booking (legacy support)
     bikeId,
+    // Multiple bike booking (new)
+    bikeItems,
+    // Common fields
     hotelId,
     roomType,
     startDate,
@@ -29,6 +36,7 @@ export const createBooking = asyncHandler(async (req, res) => {
     couponCode,
     specialRequests,
     guestDetails,
+    helmetQuantity = 0,
   } = req.body;
 
   // Validate booking type
@@ -39,77 +47,22 @@ export const createBooking = asyncHandler(async (req, res) => {
   // Validate required fields based on booking type
   if (bookingType === "bike") {
     // Validate required bike fields
-    if (
-      !bikeId ||
-      !startDate ||
-      !endDate ||
-      !startTime ||
-      !endTime ||
-      !bikeDetails
-    ) {
+    if (!startDate || !endDate || !startTime || !endTime || !priceDetails) {
       throw new ApiError(
-        "Please provide bikeId, startDate, endDate, startTime, endTime and bikeDetails",
+        "Please provide startDate, endDate, startTime, endTime and priceDetails",
         400
       );
     }
 
-    // Fetch bike document
-    const bike = await Bike.findById(bikeId);
-    if (!bike) {
-      throw new ApiError("Bike not found", 404);
-    }
+    // Support both single bike (legacy) and multiple bikes (new)
+    const isMultipleBikes = bikeItems && bikeItems.length > 0;
+    const isSingleBike = bikeId && bikeDetails;
 
-    // Validate helmet availability and charges if requested
-    const requestedHelmets = bikeDetails.helmetQuantity || 0;
-    if (requestedHelmets > 0) {
-      const helmet = await Helmet.findOne({ isActive: true });
-      if (!helmet) {
-        throw new ApiError("Helmet service is currently unavailable", 400);
-      }
-
-      // Check helmet availability for the requested period
-      const helmetBookings = await Booking.aggregate([
-        {
-          $match: {
-            bookingType: "bike",
-            bookingStatus: { $in: ["confirmed", "pending"] },
-            startDate: { $lte: new Date(endDate) },
-            endDate: { $gte: new Date(startDate) },
-            "bikeDetails.helmetQuantity": { $gt: 0 },
-          },
-        },
-        {
-          $group: {
-            _id: null,
-            totalHelmetBookings: { $sum: "$bikeDetails.helmetQuantity" },
-          },
-        },
-      ]);
-
-      const bookedHelmets = helmetBookings[0]?.totalHelmetBookings || 0;
-      const availableHelmets = helmet.totalQuantity - bookedHelmets;
-
-      if (requestedHelmets > availableHelmets) {
-        throw new ApiError(
-          `Only ${availableHelmets} helmets available for the selected period`,
-          400
-        );
-      }
-
-      // Validate helmet charges calculation
-      const expectedHelmetCharges = Math.max(0, requestedHelmets - helmet.freeHelmetPerBooking) * helmet.pricePerHelmet;
-      const sentHelmetCharges = priceDetails.helmetCharges || 0;
-      
-      if (Math.abs(expectedHelmetCharges - sentHelmetCharges) > 0.01) {
-        console.log("Helmet charges mismatch:", {
-          expected: expectedHelmetCharges,
-          sent: sentHelmetCharges,
-          requestedHelmets,
-          freeHelmets: helmet.freeHelmetPerBooking,
-          pricePerHelmet: helmet.pricePerHelmet
-        });
-        throw new ApiError("Helmet charges calculation mismatch. Please refresh and try again.", 400);
-      }
+    if (!isMultipleBikes && !isSingleBike) {
+      throw new ApiError(
+        "Please provide either bikeId with bikeDetails for single bike or bikeItems array for multiple bikes",
+        400
+      );
     }
 
     // Parse requested start/end as Date objects
@@ -123,159 +76,391 @@ export const createBooking = asyncHandler(async (req, res) => {
       throw new ApiError("Start date/time must be before end date/time", 400);
     }
 
-    // Build a query to load all existing bike bookings that could overlap
-    const startDateOnly = new Date(startDate);
-    startDateOnly.setHours(0, 0, 0, 0);
-    const endDateOnly = new Date(endDate);
-    endDateOnly.setHours(23, 59, 59, 999);
+    // Check if booking includes weekend days
+    const isWeekend = (date) => {
+      const day = date.getDay();
+      return day === 0 || day === 6; // Sunday, Saturday only
+    };
 
-    const rawBookings = await Booking.find({
-      bookingType: "bike",
-      bike: bikeId,
-      bookingStatus: { $in: ["confirmed"] },
-      startDate: { $lte: endDateOnly },
-      endDate: { $gte: startDateOnly },
-    }).select("startDate endDate startTime endTime bike");
-
-    // Group those bookings by bikeId
-    const bookingsByBike = rawBookings.reduce((map, bk) => {
-      const bStart = new Date(bk.startDate);
-      const [sh, sm] = bk.startTime.split(":").map(Number);
-      bStart.setHours(sh, sm, 0, 0);
-
-      const bEnd = new Date(bk.endDate);
-      const [eh, em] = bk.endTime.split(":").map(Number);
-      bEnd.setHours(eh, em, 0, 0);
-
-      if (bStart <= endRequested && bEnd >= startRequested) {
-        const idStr = bk.bike.toString();
-        if (!map[idStr]) map[idStr] = [];
-        map[idStr].push({ start: bStart, end: bEnd });
+    const bookingIncludesWeekend = () => {
+      const current = new Date(startRequested);
+      while (current <= endRequested) {
+        if (isWeekend(current)) {
+          return true;
+        }
+        current.setDate(current.getDate() + 1);
       }
-      return map;
-    }, {});
+      return false;
+    };
 
-    // Determine how many units of this bike type are already overlapping
-    const bikeIdStr = bike._id.toString();
-    const overlappingBookings = bookingsByBike[bikeIdStr] || [];
-    const alreadyBookedCount = overlappingBookings.length;
-    const totalUnits = bike.quantity;
+    const hasWeekendDays = bookingIncludesWeekend();
 
-    if (alreadyBookedCount >= totalUnits) {
-      throw new ApiError("Bike is not available for the selected period", 400);
+    let processedBikeItems = [];
+    let totalQuantity = 0;
+
+    if (isMultipleBikes) {
+      // Process multiple bikes booking
+      for (const item of bikeItems) {
+        if (!item.bike || !item.quantity || !item.kmOption) {
+          throw new ApiError(
+            "Each bike item must have bike, quantity, and kmOption",
+            400
+          );
+        }
+
+        // Fetch bike document
+        const bike = await Bike.findById(item.bike);
+        if (!bike) {
+          throw new ApiError(`Bike with ID ${item.bike} not found`, 404);
+        }
+
+        // Validate pricing options using proper nested structure
+        const pricingCategory = hasWeekendDays ? "weekend" : "weekday";
+
+        if (item.kmOption === "unlimited") {
+          const unlimitedOption =
+            bike.pricePerDay?.[pricingCategory]?.unlimited;
+          if (!unlimitedOption?.isActive || !unlimitedOption?.price) {
+            throw new ApiError(
+              `Unlimited km option is not available for ${bike.title} on ${pricingCategory} bookings`,
+              400
+            );
+          }
+        }
+
+        if (item.kmOption === "limited") {
+          const limitedOption = bike.pricePerDay?.[pricingCategory]?.limitedKm;
+          if (!limitedOption?.isActive || !limitedOption?.price) {
+            throw new ApiError(
+              `Limited km option is not available for ${bike.title} on ${pricingCategory} bookings`,
+              400
+            );
+          }
+        }
+
+        // Weekend rule: Only unlimited km option is available on weekends
+        if (hasWeekendDays && item.kmOption === "limited") {
+          throw new ApiError(
+            `Limited km option is not available for ${bike.title} on weekend bookings. Please select unlimited km option.`,
+            400
+          );
+        }
+
+        // Check bike availability for the requested period
+        const startDateOnly = new Date(startDate);
+        startDateOnly.setHours(0, 0, 0, 0);
+        const endDateOnly = new Date(endDate);
+        endDateOnly.setHours(23, 59, 59, 999);
+
+        const rawBookings = await Booking.aggregate([
+          {
+            $match: {
+              bookingType: "bike",
+              bookingStatus: { $in: ["confirmed", "pending"] },
+              startDate: { $lte: endDateOnly },
+              endDate: { $gte: startDateOnly },
+            },
+          },
+          {
+            $addFields: {
+              bikes: {
+                $cond: {
+                  if: { $gt: [{ $size: { $ifNull: ["$bikeItems", []] } }, 0] },
+                  then: "$bikeItems",
+                  else: [{ bike: "$bike", quantity: 1 }],
+                },
+              },
+            },
+          },
+          {
+            $unwind: "$bikes",
+          },
+          {
+            $match: {
+              "bikes.bike": bike._id,
+            },
+          },
+          {
+            $group: {
+              _id: null,
+              totalBooked: { $sum: "$bikes.quantity" },
+            },
+          },
+        ]);
+
+        const bookedQuantity = rawBookings[0]?.totalBooked || 0;
+        const availableQuantity = Math.max(0, bike.quantity - bookedQuantity);
+
+        if (item.quantity > availableQuantity) {
+          throw new ApiError(
+            `Only ${availableQuantity} units of ${bike.title} are available for the selected period`,
+            400
+          );
+        }
+
+        // Get pricing details
+        const pricingOption =
+          item.kmOption === "unlimited"
+            ? bike.pricePerDay[pricingCategory].unlimited
+            : bike.pricePerDay[pricingCategory].limitedKm;
+
+        processedBikeItems.push({
+          bike: bike._id,
+          quantity: item.quantity,
+          kmOption: item.kmOption,
+          pricePerUnit: item.pricePerUnit || pricingOption.price,
+          totalPrice: item.totalPrice || pricingOption.price * item.quantity,
+          kmLimit:
+            item.kmOption === "limited" ? pricingOption.kmLimit : undefined,
+          additionalKmPrice: bike.additionalKmPrice,
+          bikeUnits: Array.from({ length: item.quantity }, (_, index) => ({
+            unitNumber: index + 1,
+            status: "pending",
+          })),
+        });
+
+        totalQuantity += item.quantity;
+      }
+    } else {
+      // Process single bike booking (legacy support)
+      const bike = await Bike.findById(bikeId);
+      if (!bike) {
+        throw new ApiError("Bike not found", 404);
+      }
+
+      // Validate pricing options using proper nested structure
+      const pricingCategory = hasWeekendDays ? "weekend" : "weekday";
+
+      if (bikeDetails.isUnlimited) {
+        const unlimitedOption = bike.pricePerDay?.[pricingCategory]?.unlimited;
+        if (!unlimitedOption?.isActive || !unlimitedOption?.price) {
+          throw new ApiError(
+            `Unlimited km option is not available for ${pricingCategory} bookings`,
+            400
+          );
+        }
+      }
+
+      if (!bikeDetails.isUnlimited) {
+        const limitedOption = bike.pricePerDay?.[pricingCategory]?.limitedKm;
+        if (!limitedOption?.isActive || !limitedOption?.price) {
+          throw new ApiError(
+            `Limited km option is not available for ${pricingCategory} bookings`,
+            400
+          );
+        }
+      }
+
+      // Weekend rule: Only unlimited km option is available on weekends
+      if (hasWeekendDays && !bikeDetails.isUnlimited) {
+        throw new ApiError(
+          "Limited km option is not available for weekend bookings. Please select unlimited km option.",
+          400
+        );
+      }
+
+      // Check single bike availability
+      const startDateOnly = new Date(startDate);
+      startDateOnly.setHours(0, 0, 0, 0);
+      const endDateOnly = new Date(endDate);
+      endDateOnly.setHours(23, 59, 59, 999);
+
+      const rawBookings = await Booking.find({
+        bookingType: "bike",
+        bike: bikeId,
+        bookingStatus: { $in: ["confirmed"] },
+        startDate: { $lte: endDateOnly },
+        endDate: { $gte: startDateOnly },
+      }).select("startDate endDate startTime endTime bike");
+
+      const bookingsByBike = rawBookings.reduce((map, bk) => {
+        const bStart = new Date(bk.startDate);
+        const [sh, sm] = bk.startTime.split(":").map(Number);
+        bStart.setHours(sh, sm, 0, 0);
+
+        const bEnd = new Date(bk.endDate);
+        const [eh, em] = bk.endTime.split(":").map(Number);
+        bEnd.setHours(eh, em, 0, 0);
+
+        if (bStart <= endRequested && bEnd >= startRequested) {
+          const idStr = bk.bike.toString();
+          if (!map[idStr]) map[idStr] = [];
+          map[idStr].push({ start: bStart, end: bEnd });
+        }
+        return map;
+      }, {});
+
+      const bikeIdStr = bike._id.toString();
+      const overlappingBookings = bookingsByBike[bikeIdStr] || [];
+      const alreadyBookedCount = overlappingBookings.length;
+      const totalUnits = bike.quantity;
+
+      if (alreadyBookedCount >= totalUnits) {
+        throw new ApiError(
+          "Bike is not available for the selected period",
+          400
+        );
+      }
+
+      totalQuantity = 1;
     }
 
-    // Validate pricing options
-    if (bikeDetails.isUnlimited && !bike.pricePerDay.unlimited.isActive) {
-      throw new ApiError(
-        "Unlimited km option is not available for this bike",
-        400
-      );
-    }
-    if (!bikeDetails.isUnlimited && !bike.pricePerDay.limitedKm.isActive) {
-      throw new ApiError(
-        "Limited km option is not available for this bike",
-        400
-      );
+    // Validate helmet availability and charges if requested
+    if (helmetQuantity > 0) {
+      const helmet = await Helmet.findOne({ isActive: true });
+      if (!helmet) {
+        throw new ApiError("Helmet service is currently unavailable", 400);
+      }
+
+      // Check helmet availability for the requested period
+      const helmetBookings = await Booking.aggregate([
+        {
+          $match: {
+            bookingType: "bike",
+            bookingStatus: { $in: ["confirmed", "pending"] },
+            startDate: { $lte: new Date(endDate) },
+            endDate: { $gte: new Date(startDate) },
+            "helmetDetails.quantity": { $gt: 0 },
+          },
+        },
+        {
+          $group: {
+            _id: null,
+            totalHelmetBookings: { $sum: "$helmetDetails.quantity" },
+          },
+        },
+      ]);
+
+      const bookedHelmets = helmetBookings[0]?.totalHelmetBookings || 0;
+      const availableHelmets = helmet.totalQuantity - bookedHelmets;
+
+      if (helmetQuantity > availableHelmets) {
+        throw new ApiError(
+          `Only ${availableHelmets} helmets available for the selected period`,
+          400
+        );
+      }
+
+      // Validate helmet charges calculation - 1 free helmet per bike, multiplied by rental days
+      const startDateOnly = new Date(startDate);
+      const endDateOnly = new Date(endDate);
+      const rentalDays = Math.ceil((endDateOnly - startDateOnly) / (1000 * 60 * 60 * 24)) + 1;
+      
+      const freeHelmets = totalQuantity;
+      const expectedHelmetCharges =
+        Math.max(0, helmetQuantity - freeHelmets) * helmet.pricePerHelmet * rentalDays;
+      const sentHelmetCharges = priceDetails.helmetCharges || 0;
+
+      if (Math.abs(expectedHelmetCharges - sentHelmetCharges) > 0.01) {
+        console.log("Helmet charges mismatch:", {
+          expected: expectedHelmetCharges,
+          sent: sentHelmetCharges,
+          requestedHelmets: helmetQuantity,
+          freeHelmets: freeHelmets,
+          pricePerHelmet: helmet.pricePerHelmet,
+          rentalDays: rentalDays,
+        });
+        throw new ApiError(
+          "Helmet charges calculation mismatch. Please refresh and try again.",
+          400
+        );
+      }
     }
 
-    // Validate pricing by recalculating on server side for security
-    let serverPricing;
-    try {
-      serverPricing = calculateRentalPricing({
-        bike,
-        startDate,
-        startTime,
-        endDate,
-        endTime,
-        kmOption: bikeDetails.isUnlimited ? "unlimited" : "limited",
-      });
-    } catch (err) {
-      throw new ApiError(`Pricing calculation error: ${err.message}`, 400);
-    }
-
-    // Validate that the frontend pricing matches server calculation (with tolerance for helmet charges)
-    const expectedBaseTotal = serverPricing.breakdown.total;
-    const frontendBaseTotal = priceDetails.totalAmount - (priceDetails.helmetCharges || 0);
-    
-    if (Math.abs(expectedBaseTotal - frontendBaseTotal) > 1) {
-      console.log("Pricing mismatch:", {
-        serverCalculated: expectedBaseTotal,
-        frontendSent: frontendBaseTotal,
-        difference: Math.abs(expectedBaseTotal - frontendBaseTotal)
-      });
-      throw new ApiError("Pricing mismatch detected. Please refresh and try again.", 400);
-    }
-
-    // Update bike availability
-    bike.availableQuantity = bike.availableQuantity - 1;
-    if (bike.availableQuantity <= 0) {
-      bike.status = "booked";
-    }
-    await bike.save();
-
-    // Create booking using the validated pricing details from frontend
-    const booking = await Booking.create({
+    // Create booking with either single bike or multiple bikes
+    const bookingData = {
       user: req.user._id,
       bookingType: "bike",
-      bike: bikeId,
-      hotel: undefined,
-      roomType: undefined,
       startDate,
       endDate,
       startTime,
       endTime,
-      numberOfPeople: undefined,
-      priceDetails: {
-        ...priceDetails,
-        // Use the pricing details sent from frontend after server-side validation
-        extraAmount: priceDetails.extraCharges || 0,
-        // Include GST percentage from server pricing calculation or frontend
-        gstPercentage: priceDetails.gstPercentage || serverPricing.breakdown.gstPercentage || 5,
+      priceDetails,
+      helmetDetails: {
+        quantity: helmetQuantity,
+        charges: priceDetails.helmetCharges || 0,
       },
-      bikeDetails: {
-        ...bikeDetails,
-        helmetQuantity: requestedHelmets,
-        helmetCharges: priceDetails.helmetCharges || 0,
-      },
-      hotelDetails: undefined,
       couponCode,
       specialRequests,
       guestDetails,
       bookingStatus: "pending",
-    });
+    };
+
+    if (isMultipleBikes) {
+      // Multiple bikes booking
+      bookingData.bikeItems = processedBikeItems;
+    } else {
+      // Single bike booking (legacy)
+      bookingData.bike = bikeId;
+      bookingData.bikeDetails = {
+        ...bikeDetails,
+        helmetQuantity: helmetQuantity,
+        helmetCharges: priceDetails.helmetCharges || 0,
+      };
+    }
+
+    const booking = await Booking.create(bookingData);
+
+    // Update bike availability for all bikes
+    if (isMultipleBikes) {
+      for (const item of processedBikeItems) {
+        const bike = await Bike.findById(item.bike);
+        bike.availableQuantity = Math.max(
+          0,
+          bike.availableQuantity - item.quantity
+        );
+        if (bike.availableQuantity <= 0) {
+          bike.status = "booked";
+        }
+        await bike.save();
+      }
+    } else {
+      const bike = await Bike.findById(bikeId);
+      bike.availableQuantity = bike.availableQuantity - 1;
+      if (bike.availableQuantity <= 0) {
+        bike.status = "booked";
+      }
+      await bike.save();
+    }
 
     // Send confirmation email & SMS
     const user = await User.findById(req.user._id).select("name email mobile");
-    const gstPercentage = priceDetails.gstPercentage || serverPricing.breakdown.gstPercentage || 5;
-    const emailMessage = `
-      <h1>Bike Booking Confirmation</h1>
-      <p>Dear ${user.name},</p>
-      <p>Your bike booking has been confirmed.</p>
-      <p>Booking ID: ${booking._id}</p>
-      <p>Start: ${new Date(
-        startDate + "T" + startTime + ":00"
-      ).toLocaleString()}</p>
-      <p>End: ${new Date(endDate + "T" + endTime + ":00").toLocaleString()}</p>
-      <p>Helmets: ${requestedHelmets}</p>
-      <p>Helmet Charges: ₹${(priceDetails.helmetCharges || 0).toFixed(2)}</p>
-      <p>Extra Charges: ₹${(priceDetails.extraCharges || 0).toFixed(2)}</p>
-      <p>GST (${gstPercentage}%): ₹${(priceDetails.taxes || 0).toFixed(2)}</p>
-      <p>Total Amount: ₹${priceDetails.totalAmount.toFixed(2)}</p>
-      <p>Thank you for choosing HappyGo!</p>
-    `;
+    const gstPercentage = priceDetails.gstPercentage || 5;
 
-    await sendEmail({
-      email: user.email,
-      subject: "HappyGo Bike Booking Confirmation",
-      message: emailMessage,
-    });
+    const bikeInfo = isMultipleBikes
+      ? `${processedBikeItems.length} bike(s) with ${totalQuantity} total units`
+      : "1 bike";
+
+    // const emailMessage = `
+    //   <h1>Bike Booking Confirmation</h1>
+    //   <p>Dear ${user.name},</p>
+    //   <p>Your bike booking has been confirmed.</p>
+    //   <p>Booking ID: ${booking._id}</p>
+    //   <p>Bikes: ${bikeInfo}</p>
+    //   <p>Start: ${new Date(
+    //     startDate + "T" + startTime + ":00"
+    //   ).toLocaleString()}</p>
+    //   <p>End: ${new Date(endDate + "T" + endTime + ":00").toLocaleString()}</p>
+    //   <p>Helmets: ${helmetQuantity}</p>
+    //   <p>Helmet Charges: ₹${(priceDetails.helmetCharges || 0).toFixed(2)}</p>
+    //   <p>Extra Charges: ₹${(priceDetails.extraCharges || 0).toFixed(2)}</p>
+    //   <p>GST (${gstPercentage}%): ₹${(priceDetails.taxes || 0).toFixed(2)}</p>
+    //   <p>Total Amount: ₹${priceDetails.totalAmount.toFixed(2)}</p>
+    //   <p>Thank you for choosing HappyGo!</p>
+    // `;
+
+    // await sendEmail({
+    //   email: user.email,
+    //   subject: "HappyGo Bike Booking Confirmation",
+    //   message: emailMessage,
+    // });
 
     return res.status(201).json({
       success: true,
       data: booking,
     });
   } else if (bookingType === "hotel") {
+    // Hotel booking logic remains unchanged
     if (
       !hotelId ||
       !roomType ||
@@ -345,62 +530,48 @@ export const createBooking = asyncHandler(async (req, res) => {
         400
       );
     }
+
+    // Create hotel booking
+    const booking = await Booking.create({
+      user: req.user._id,
+      bookingType,
+      hotel: hotelId,
+      roomType,
+      startDate,
+      endDate,
+      numberOfPeople,
+      priceDetails,
+      hotelDetails,
+      couponCode,
+      specialRequests,
+      guestDetails,
+      bookingStatus: "pending",
+    });
+
+    // Send confirmation email
+    const user = await User.findById(req.user._id);
+    const emailMessage = `
+      <h1>Hotel Booking Confirmation</h1>
+      <p>Dear ${user.name},</p>
+      <p>Your hotel booking has been confirmed.</p>
+      <p>Booking ID: ${booking._id}</p>
+      <p>Start Date: ${new Date(startDate).toLocaleDateString()}</p>
+      <p>End Date: ${new Date(endDate).toLocaleDateString()}</p>
+      <p>Total Amount: ₹${priceDetails.totalAmount}</p>
+      <p>Thank you for choosing HappyGo!</p>
+    `;
+
+    await sendEmail({
+      email: user.email,
+      subject: "HappyGo Hotel Booking Confirmation",
+      message: emailMessage,
+    });
+
+    return res.status(201).json({
+      success: true,
+      data: booking,
+    });
   }
-
-  // Create booking
-  const booking = await Booking.create({
-    user: req.user._id,
-    bookingType,
-    bike: bookingType === "bike" ? bikeId : undefined,
-    hotel: bookingType === "hotel" ? hotelId : undefined,
-    roomType: bookingType === "hotel" ? roomType : undefined,
-    startDate,
-    endDate,
-    startTime: bookingType === "bike" ? startTime : undefined,
-    endTime: bookingType === "bike" ? endTime : undefined,
-    numberOfPeople: bookingType === "hotel" ? numberOfPeople : undefined,
-    priceDetails,
-    bikeDetails: bookingType === "bike" ? bikeDetails : undefined,
-    hotelDetails: bookingType === "hotel" ? hotelDetails : undefined,
-    couponCode,
-    specialRequests,
-    guestDetails,
-    bookingStatus: "pending", // Set initial status
-  });
-
-  // Send confirmation email
-  const user = await User.findById(req.user._id);
-  const bookingTypeText = bookingType === "bike" ? "Bike" : "Hotel";
-
-  const emailMessage = `
-    <h1>Booking Confirmation</h1>
-    <p>Dear ${user.name},</p>
-    <p>Your ${bookingTypeText} booking has been confirmed.</p>
-    <p>Booking ID: ${booking._id}</p>
-    <p>Start Date: ${new Date(startDate).toLocaleDateString()}</p>
-    <p>End Date: ${new Date(endDate).toLocaleDateString()}</p>
-    <p>Total Amount: ₹${priceDetails.totalAmount}</p>
-    <p>Thank you for choosing HappyGo!</p>
-  `;
-
-  await sendEmail({
-    email: user.email,
-    subject: `HappyGo ${bookingTypeText} Booking Confirmation`,
-    message: emailMessage,
-  });
-
-  // Send confirmation SMS
-  const smsMessage = `Your HappyGo ${bookingTypeText} booking is confirmed. Booking ID: ${booking._id}. Total Amount: ₹${priceDetails.totalAmount}. Thank you for choosing HappyGo!`;
-
-  // await sendSMS({
-  //   phone: user.mobile,
-  //   message: smsMessage,
-  // })
-
-  res.status(201).json({
-    success: true,
-    data: booking,
-  });
 });
 
 // @desc    Get all bookings
@@ -448,6 +619,10 @@ export const getBookings = asyncHandler(async (req, res) => {
       select: "title brand model images",
     })
     .populate({
+      path: "bikeItems.bike",
+      select: "title brand model images",
+    })
+    .populate({
       path: "hotel",
       select: "name location images",
     })
@@ -472,19 +647,30 @@ export const getBooking = asyncHandler(async (req, res) => {
   const booking = await Booking.findById(req.params.id)
     .populate({
       path: "bike",
-      select: "title brand model images pricePerDay additionalKmPrice",
+      select:
+        "title brand model year images pricePerDay additionalKmPrice registrationNumber location features requiredDocuments termsAndConditions ratings numReviews quantity availableQuantity status isTrending specialPricing bulkDiscounts",
+    })
+    .populate({
+      path: "bikeItems.bike",
+      select:
+        "title brand model year images pricePerDay additionalKmPrice registrationNumber location features requiredDocuments termsAndConditions ratings numReviews quantity availableQuantity status isTrending specialPricing bulkDiscounts",
     })
     .populate({
       path: "hotel",
-      select: "name location images rooms",
+      select:
+        "name description location images rooms amenities policies ratings numReviews checkInTime checkOutTime address contactInfo",
     })
     .populate({
       path: "user",
-      select: "name email mobile",
+      select: "name email mobile profilePicture",
     })
     .populate({
       path: "assignedEmployee",
-      select: "name email mobile",
+      select: "name email mobile role department",
+    })
+    .populate({
+      path: "completedBy",
+      select: "name email mobile role",
     });
 
   if (!booking) {
@@ -499,9 +685,132 @@ export const getBooking = asyncHandler(async (req, res) => {
     throw new ApiError("Not authorized to access this booking", 401);
   }
 
+  // Add computed fields for better frontend usage
+  const enhancedBooking = booking.toObject();
+
+  // For bike bookings, add useful computed information
+  if (booking.bookingType === "bike") {
+    // Calculate rental duration in hours and days
+    const startDateTime = new Date(
+      `${booking.startDate.toISOString().split("T")[0]}T${booking.startTime}`
+    );
+    const endDateTime = new Date(
+      `${booking.endDate.toISOString().split("T")[0]}T${booking.endTime}`
+    );
+    const durationInHours = (endDateTime - startDateTime) / (1000 * 60 * 60);
+    const durationInDays = Math.ceil(durationInHours / 24);
+
+    enhancedBooking.computedDetails = {
+      durationInHours: Math.round(durationInHours * 100) / 100,
+      durationInDays,
+      isOverdue:
+        booking.bookingStatus === "confirmed" && new Date() > endDateTime,
+      canExtend:
+        booking.bookingStatus === "confirmed" && new Date() < endDateTime,
+      canCancel:
+        booking.bookingStatus === "pending" ||
+        (booking.bookingStatus === "confirmed" && new Date() < startDateTime),
+    };
+
+    // Add bike-specific details for multiple bikes
+    if (booking.bikeItems && booking.bikeItems.length > 0) {
+      enhancedBooking.totalBikes = booking.bikeItems.reduce(
+        (sum, item) => sum + item.quantity,
+        0
+      );
+      enhancedBooking.bikeTypes = booking.bikeItems.length;
+      enhancedBooking.bikeItemsWithDetails = booking.bikeItems.map((item) => ({
+        ...item.toObject(),
+        bike: item.bike
+          ? {
+              ...item.bike.toObject(),
+              currentAvailability: item.bike.availableQuantity,
+              isHighDemand: item.bike.availableQuantity < 3,
+              hasSpecialPricing:
+                item.bike.specialPricing && item.bike.specialPricing.length > 0,
+            }
+          : null,
+      }));
+    }
+
+    // Add single bike details if applicable
+    if (booking.bike) {
+      enhancedBooking.bike = {
+        ...booking.bike.toObject(),
+        currentAvailability: booking.bike.availableQuantity,
+        isHighDemand: booking.bike.availableQuantity < 3,
+        hasSpecialPricing:
+          booking.bike.specialPricing && booking.bike.specialPricing.length > 0,
+      };
+    }
+  }
+
+  // For hotel bookings, add useful computed information
+  if (booking.bookingType === "hotel") {
+    const checkInDate = new Date(booking.startDate);
+    const checkOutDate = new Date(booking.endDate);
+    const nightsStayed = Math.ceil(
+      (checkOutDate - checkInDate) / (1000 * 60 * 60 * 24)
+    );
+
+    enhancedBooking.computedDetails = {
+      nightsStayed,
+      canCancel:
+        booking.bookingStatus === "pending" ||
+        (booking.bookingStatus === "confirmed" && new Date() < checkInDate),
+      canModify:
+        booking.bookingStatus === "confirmed" && new Date() < checkInDate,
+    };
+
+    // Calculate total rooms booked
+    if (booking.hotelDetails && booking.hotelDetails.roomOptions) {
+      const roomOptions = booking.hotelDetails.roomOptions;
+      enhancedBooking.totalRooms =
+        (roomOptions.bedOnly?.quantity || 0) +
+        (roomOptions.bedAndBreakfast?.quantity || 0) +
+        (roomOptions.bedBreakfastAndDinner?.quantity || 0);
+    }
+  }
+
+  // Add payment and status information
+  enhancedBooking.statusInfo = {
+    canMakePayment:
+      booking.paymentStatus === "pending" &&
+      booking.bookingStatus === "pending",
+    isPaymentCompleted: booking.paymentStatus === "completed",
+    isBookingActive: booking.bookingStatus === "confirmed",
+    isBookingCompleted: booking.bookingStatus === "completed",
+    isCancellable:
+      booking.bookingStatus === "pending" ||
+      booking.bookingStatus === "confirmed",
+  };
+
+  // Add formatted dates for frontend display
+  enhancedBooking.formattedDates = {
+    startDate: booking.startDate.toLocaleDateString("en-IN", {
+      weekday: "short",
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    }),
+    endDate: booking.endDate.toLocaleDateString("en-IN", {
+      weekday: "short",
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    }),
+    createdAt: booking.createdAt.toLocaleDateString("en-IN", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }),
+  };
+
   res.status(200).json({
     success: true,
-    data: booking,
+    data: enhancedBooking,
   });
 });
 

@@ -8,6 +8,7 @@ import Product from "../models/product.model.js";
 import Referral from "../models/referral.model.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
+import mongoose from "mongoose";
 
 // @desc    Get admin dashboard data
 // @route   GET /api/admin/dashboard
@@ -220,7 +221,8 @@ export const createEmployee = asyncHandler(async (req, res) => {
     role,
     assignedModules,
     assignedEntities: [], // Empty array as we're giving full section access
-    createdBy: req.user._id,
+    // dummy object id for createdBy
+    createdBy: new mongoose.Types.ObjectId(),
   });
 
   res.status(201).json({

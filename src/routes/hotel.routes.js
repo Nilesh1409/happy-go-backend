@@ -7,16 +7,16 @@ import {
   updateHotel,
   deleteHotel,
 } from "../controllers/hotel.controller.js"
-import { adminProtect } from "../middleware/auth.middleware.js"
+import {  employeeProtect } from "../middleware/auth.middleware.js"
 
 const router = express.Router()
 
 router.get("/", getHotels)
 router.get("/available", getAvailableHotels)
 router.get("/:id", getHotel)
-router.post("/", adminProtect, createHotel)
-router.put("/:id", adminProtect, updateHotel)
-router.delete("/:id", adminProtect, deleteHotel)
+router.post("/", employeeProtect, createHotel)
+router.put("/:id", employeeProtect, updateHotel)
+router.delete("/:id", employeeProtect, deleteHotel)
 
 export default router
 
