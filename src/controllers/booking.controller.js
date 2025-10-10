@@ -341,10 +341,14 @@ export const createBooking = asyncHandler(async (req, res) => {
         );
       }
 
-      // Validate helmet charges calculation - 1 free helmet per bike
+      // Validate helmet charges calculation - 1 free helmet per bike, multiplied by rental days
+      const startDateOnly = new Date(startDate);
+      const endDateOnly = new Date(endDate);
+      const rentalDays = Math.ceil((endDateOnly - startDateOnly) / (1000 * 60 * 60 * 24)) + 1;
+      
       const freeHelmets = totalQuantity;
       const expectedHelmetCharges =
-        Math.max(0, helmetQuantity - freeHelmets) * helmet.pricePerHelmet;
+        Math.max(0, helmetQuantity - freeHelmets) * helmet.pricePerHelmet * rentalDays;
       const sentHelmetCharges = priceDetails.helmetCharges || 0;
 
       if (Math.abs(expectedHelmetCharges - sentHelmetCharges) > 0.01) {
@@ -354,6 +358,7 @@ export const createBooking = asyncHandler(async (req, res) => {
           requestedHelmets: helmetQuantity,
           freeHelmets: freeHelmets,
           pricePerHelmet: helmet.pricePerHelmet,
+          rentalDays: rentalDays,
         });
         throw new ApiError(
           "Helmet charges calculation mismatch. Please refresh and try again.",
