@@ -8,14 +8,25 @@ import {
   updateProfile,
   uploadDLImage,
   getUserProfile,
+  uploadAadhaarImage,
+  getDocumentsStatus,
+  deleteDLImage,
 } from "../controllers/user.controller.js";
 import { protect } from "../middleware/auth.middleware.js";
 
-router.put("/profile", protect, updateProfile);
-router.post("/aadhaar", protect, updateAadhaar);
-router.post("/dl-image", protect, upload.single("dlImage"), uploadDLImage);
+// Profile routes
 router.get("/profile", protect, getUserProfile);
-// router.post('/reset-password', resetPassword);
-// router.put("/profile", protect, updateProfile);
+router.put("/profile", protect, updateProfile);
+
+// Document routes
+router.get("/documents/status", protect, getDocumentsStatus);
+
+// Aadhaar routes
+router.post("/aadhaar", protect, updateAadhaar);
+router.post("/aadhaar/image", protect, upload.single("aadhaarImage"), uploadAadhaarImage);
+
+// Driving License routes
+router.post("/dl-image", protect, upload.single("dlImage"), uploadDLImage);
+router.delete("/dl-image", protect, deleteDLImage);
 
 export default router;

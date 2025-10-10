@@ -1,0 +1,727 @@
+{
+  "info": {
+    "name": "Hotel/Hostel API Collection",
+    "description": "Complete collection of Hotel/Hostel API endpoints for HappyGo Backend",
+    "version": "1.0.0",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "BASE_URL",
+      "value": "http://localhost:5000/api",
+      "type": "string"
+    },
+    {
+      "key": "USER_TOKEN",
+      "value": "your_user_jwt_token_here",
+      "type": "string"
+    },
+    {
+      "key": "ADMIN_TOKEN",
+      "value": "your_admin_jwt_token_here",
+      "type": "string"
+    },
+    {
+      "key": "EMPLOYEE_TOKEN",
+      "value": "your_employee_jwt_token_here",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Hotel Management",
+      "item": [
+        {
+          "name": "Get All Hotels",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/hotels?limit=10&page=1&sort=-createdAt",
+              "host": ["{{BASE_URL}}"],
+              "path": ["hotels"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "10",
+                  "description": "Number of hotels per page"
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "Page number"
+                },
+                {
+                  "key": "sort",
+                  "value": "-createdAt",
+                  "description": "Sort by field (prefix with - for descending)"
+                },
+                {
+                  "key": "search",
+                  "value": "Chikkamagaluru",
+                  "disabled": true,
+                  "description": "Search by name or location"
+                }
+              ]
+            },
+            "description": "Get all hotels with pagination, sorting, and search functionality"
+          }
+        },
+        {
+          "name": "Get Single Hotel",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/hotels/:hotelId",
+              "host": ["{{BASE_URL}}"],
+              "path": ["hotels", ":hotelId"],
+              "variable": [
+                {
+                  "key": "hotelId",
+                  "value": "hotel_id_here",
+                  "description": "Hotel ID"
+                }
+              ]
+            },
+            "description": "Get detailed information about a specific hotel"
+          }
+        },
+        {
+          "name": "Get Available Hotels",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/hotels/available?checkIn=2025-05-01&checkOut=2025-05-03&people=2",
+              "host": ["{{BASE_URL}}"],
+              "path": ["hotels", "available"],
+              "query": [
+                {
+                  "key": "checkIn",
+                  "value": "2025-05-01",
+                  "description": "Check-in date (YYYY-MM-DD)"
+                },
+                {
+                  "key": "checkOut",
+                  "value": "2025-05-03",
+                  "description": "Check-out date (YYYY-MM-DD)"
+                },
+                {
+                  "key": "people",
+                  "value": "2",
+                  "description": "Number of people"
+                }
+              ]
+            },
+            "description": "Get hotels available for booking in a specific time period with room availability"
+          }
+        },
+        {
+          "name": "Create Hotel (Admin Only)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{ADMIN_TOKEN}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Mountain View Hostel\",\n  \"description\": \"A cozy hostel with beautiful mountain views and modern amenities\",\n  \"location\": \"Chikkamagaluru\",\n  \"address\": \"123 Mountain Road, Chikkamagaluru, Karnataka 577101\",\n  \"images\": [\n    \"https://example.com/hotel1.jpg\",\n    \"https://example.com/hotel2.jpg\"\n  ],\n  \"amenities\": [\n    {\n      \"name\": \"Free WiFi\",\n      \"icon\": \"wifi\"\n    },\n    {\n      \"name\": \"Parking\",\n      \"icon\": \"parking\"\n    },\n    {\n      \"name\": \"24/7 Reception\",\n      \"icon\": \"reception\"\n    }\n  ],\n  \"rooms\": [\n    {\n      \"type\": \"Single Bed\",\n      \"description\": \"Comfortable single bed room with shared bathroom\",\n      \"images\": [\"https://example.com/single-room.jpg\"],\n      \"capacity\": 1,\n      \"priceOptions\": {\n        \"bedOnly\": {\n          \"basePrice\": 800,\n          \"discountedPrice\": 700\n        },\n        \"bedAndBreakfast\": {\n          \"basePrice\": 1000,\n          \"discountedPrice\": 900\n        },\n        \"bedBreakfastAndDinner\": {\n          \"basePrice\": 1400,\n          \"discountedPrice\": 1200\n        }\n      },\n      \"amenities\": [\"AC\", \"WiFi\", \"Towels\"],\n      \"totalRooms\": 10,\n      \"availableRooms\": 10\n    },\n    {\n      \"type\": \"Double Bed\",\n      \"description\": \"Spacious double bed room with private bathroom\",\n      \"images\": [\"https://example.com/double-room.jpg\"],\n      \"capacity\": 2,\n      \"priceOptions\": {\n        \"bedOnly\": {\n          \"basePrice\": 1200,\n          \"discountedPrice\": 1000\n        },\n        \"bedAndBreakfast\": {\n          \"basePrice\": 1500,\n          \"discountedPrice\": 1300\n        },\n        \"bedBreakfastAndDinner\": {\n          \"basePrice\": 2000,\n          \"discountedPrice\": 1800\n        }\n      },\n      \"amenities\": [\"AC\", \"WiFi\", \"Private Bathroom\", \"TV\"],\n      \"totalRooms\": 5,\n      \"availableRooms\": 5\n    }\n  ],\n  \"guidelines\": [\n    \"Check-in time: 2:00 PM\",\n    \"Check-out time: 11:00 AM\",\n    \"No smoking inside rooms\",\n    \"Quiet hours: 10:00 PM - 7:00 AM\"\n  ],\n  \"checkInGuidelines\": [\n    \"Valid ID required for check-in\",\n    \"Advance payment required\",\n    \"Guest registration mandatory\"\n  ],\n  \"cancellationPolicies\": [\n    \"Free cancellation up to 24 hours before check-in\",\n    \"50% refund for cancellations within 24 hours\",\n    \"No refund for no-shows\"\n  ],\n  \"ratings\": 4.2,\n  \"numReviews\": 45,\n  \"isActive\": true\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/hotels",
+              "host": ["{{BASE_URL}}"],
+              "path": ["hotels"]
+            },
+            "description": "Create a new hotel (Admin access required)"
+          }
+        },
+        {
+          "name": "Update Hotel (Admin Only)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{ADMIN_TOKEN}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Updated Mountain View Hostel\",\n  \"description\": \"An updated cozy hostel with beautiful mountain views\",\n  \"ratings\": 4.5,\n  \"isActive\": true\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/hotels/:hotelId",
+              "host": ["{{BASE_URL}}"],
+              "path": ["hotels", ":hotelId"],
+              "variable": [
+                {
+                  "key": "hotelId",
+                  "value": "hotel_id_here",
+                  "description": "Hotel ID to update"
+                }
+              ]
+            },
+            "description": "Update hotel details (Admin access required)"
+          }
+        },
+        {
+          "name": "Delete Hotel (Admin Only)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{ADMIN_TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{BASE_URL}}/hotels/:hotelId",
+              "host": ["{{BASE_URL}}"],
+              "path": ["hotels", ":hotelId"],
+              "variable": [
+                {
+                  "key": "hotelId",
+                  "value": "hotel_id_here",
+                  "description": "Hotel ID to delete"
+                }
+              ]
+            },
+            "description": "Delete a hotel (Admin access required)"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Hotel Bookings",
+      "item": [
+        {
+          "name": "Create Hotel Booking",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{USER_TOKEN}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bookingType\": \"hotel\",\n  \"hotelId\": \"hotel_id_here\",\n  \"roomType\": \"Double Bed\",\n  \"startDate\": \"2025-05-01\",\n  \"endDate\": \"2025-05-03\",\n  \"numberOfPeople\": 2,\n  \"priceDetails\": {\n    \"basePrice\": 2400,\n    \"subtotal\": 2400,\n    \"bulkDiscount\": {\n      \"amount\": 0,\n      \"percentage\": 0\n    },\n    \"surgeMultiplier\": 1,\n    \"extraCharges\": 0,\n    \"helmetCharges\": 0,\n    \"taxes\": 120,\n    \"gstPercentage\": 5,\n    \"discount\": 0,\n    \"totalAmount\": 2520\n  },\n  \"hotelDetails\": {\n    \"roomOptions\": {\n      \"bedOnly\": {\n        \"quantity\": 0,\n        \"pricePerUnit\": 0\n      },\n      \"bedAndBreakfast\": {\n        \"quantity\": 1,\n        \"pricePerUnit\": 1200\n      },\n      \"bedBreakfastAndDinner\": {\n        \"quantity\": 0,\n        \"pricePerUnit\": 0\n      }\n    },\n    \"checkInTime\": \"14:00\"\n  },\n  \"guestDetails\": {\n    \"name\": \"John Doe\",\n    \"email\": \"john@example.com\",\n    \"mobile\": \"9876543210\"\n  },\n  \"specialRequests\": \"Late check-in requested\",\n  \"couponCode\": \"\"\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/bookings",
+              "host": ["{{BASE_URL}}"],
+              "path": ["bookings"]
+            },
+            "description": "Create a new hotel booking"
+          }
+        },
+        {
+          "name": "Get User Hotel Bookings",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{USER_TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{BASE_URL}}/bookings/hotels?status=confirmed&limit=10&page=1&sort=-createdAt",
+              "host": ["{{BASE_URL}}"],
+              "path": ["bookings", "hotels"],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "confirmed",
+                  "description": "Filter by booking status (pending, confirmed, cancelled, completed)"
+                },
+                {
+                  "key": "limit",
+                  "value": "10",
+                  "description": "Number of bookings per page"
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "Page number"
+                },
+                {
+                  "key": "sort",
+                  "value": "-createdAt",
+                  "description": "Sort by field"
+                }
+              ]
+            },
+            "description": "Get user's hotel bookings with filtering and pagination"
+          }
+        },
+        {
+          "name": "Get Hotel Booking Details",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{USER_TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{BASE_URL}}/bookings/:bookingId",
+              "host": ["{{BASE_URL}}"],
+              "path": ["bookings", ":bookingId"],
+              "variable": [
+                {
+                  "key": "bookingId",
+                  "value": "booking_id_here",
+                  "description": "Hotel booking ID"
+                }
+              ]
+            },
+            "description": "Get detailed information about a specific hotel booking"
+          }
+        },
+        {
+          "name": "Update Hotel Booking Details",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{USER_TOKEN}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"checkInTime\": \"15:30\",\n  \"specialRequests\": \"Updated: Need extra towels and early breakfast\"\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/bookings/:bookingId/hotel-details",
+              "host": ["{{BASE_URL}}"],
+              "path": ["bookings", ":bookingId", "hotel-details"],
+              "variable": [
+                {
+                  "key": "bookingId",
+                  "value": "booking_id_here",
+                  "description": "Hotel booking ID"
+                }
+              ]
+            },
+            "description": "Update hotel booking details like check-in time and special requests"
+          }
+        },
+        {
+          "name": "Cancel Hotel Booking",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{USER_TOKEN}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"cancelled\",\n  \"cancellationReason\": \"Change of travel plans\"\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/bookings/:bookingId/status",
+              "host": ["{{BASE_URL}}"],
+              "path": ["bookings", ":bookingId", "status"],
+              "variable": [
+                {
+                  "key": "bookingId",
+                  "value": "booking_id_here",
+                  "description": "Hotel booking ID"
+                }
+              ]
+            },
+            "description": "Cancel a hotel booking"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Employee Hotel Management",
+      "item": [
+        {
+          "name": "Get Hotels (Employee)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{EMPLOYEE_TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{BASE_URL}}/employee/hotels?limit=10&page=1",
+              "host": ["{{BASE_URL}}"],
+              "path": ["employee", "hotels"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "10"
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                }
+              ]
+            },
+            "description": "Get hotels list for employee management"
+          }
+        },
+        {
+          "name": "Get Hotel Details (Employee)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{EMPLOYEE_TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{BASE_URL}}/employee/hotels/:hotelId",
+              "host": ["{{BASE_URL}}"],
+              "path": ["employee", "hotels", ":hotelId"],
+              "variable": [
+                {
+                  "key": "hotelId",
+                  "value": "hotel_id_here"
+                }
+              ]
+            },
+            "description": "Get detailed hotel information for employee"
+          }
+        },
+        {
+          "name": "Update Hotel (Employee)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{EMPLOYEE_TOKEN}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Updated Hotel Name\",\n  \"description\": \"Updated description\",\n  \"isActive\": true,\n  \"rooms\": [\n    {\n      \"type\": \"Single Bed\",\n      \"availableRooms\": 8\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/employee/hotels/:hotelId",
+              "host": ["{{BASE_URL}}"],
+              "path": ["employee", "hotels", ":hotelId"],
+              "variable": [
+                {
+                  "key": "hotelId",
+                  "value": "hotel_id_here"
+                }
+              ]
+            },
+            "description": "Update hotel details as employee"
+          }
+        },
+        {
+          "name": "Get All Hotel Bookings (Employee)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{EMPLOYEE_TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{BASE_URL}}/employee/bookings?type=hotel&status=confirmed&limit=20&page=1",
+              "host": ["{{BASE_URL}}"],
+              "path": ["employee", "bookings"],
+              "query": [
+                {
+                  "key": "type",
+                  "value": "hotel",
+                  "description": "Filter by booking type"
+                },
+                {
+                  "key": "status",
+                  "value": "confirmed",
+                  "description": "Filter by status"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "hotel",
+                  "value": "hotel_id_here",
+                  "disabled": true,
+                  "description": "Filter by specific hotel"
+                }
+              ]
+            },
+            "description": "Get all hotel bookings for employee management"
+          }
+        },
+        {
+          "name": "Get Hotel Booking Details (Employee)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{EMPLOYEE_TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{BASE_URL}}/employee/bookings/:bookingId",
+              "host": ["{{BASE_URL}}"],
+              "path": ["employee", "bookings", ":bookingId"],
+              "variable": [
+                {
+                  "key": "bookingId",
+                  "value": "booking_id_here"
+                }
+              ]
+            },
+            "description": "Get detailed hotel booking information for employee"
+          }
+        },
+        {
+          "name": "Extend Hotel Booking (Employee)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{EMPLOYEE_TOKEN}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"newEndDate\": \"2025-05-05\",\n  \"additionalAmount\": 1200,\n  \"reason\": \"Guest requested extension due to travel delay\"\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/employee/bookings/:bookingId/extend",
+              "host": ["{{BASE_URL}}"],
+              "path": ["employee", "bookings", ":bookingId", "extend"],
+              "variable": [
+                {
+                  "key": "bookingId",
+                  "value": "booking_id_here"
+                }
+              ]
+            },
+            "description": "Extend a hotel booking"
+          }
+        },
+        {
+          "name": "Checkout Hotel Booking (Employee)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{EMPLOYEE_TOKEN}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"checkoutNotes\": \"Guest checked out successfully. Room was in good condition.\",\n  \"additionalCharges\": 0\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/employee/bookings/:bookingId/checkout",
+              "host": ["{{BASE_URL}}"],
+              "path": ["employee", "bookings", ":bookingId", "checkout"],
+              "variable": [
+                {
+                  "key": "bookingId",
+                  "value": "booking_id_here"
+                }
+              ]
+            },
+            "description": "Complete hotel booking checkout"
+          }
+        },
+        {
+          "name": "Cancel Hotel Booking (Employee)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{EMPLOYEE_TOKEN}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cancellationReason\": \"Guest requested cancellation due to emergency\",\n  \"refundAmount\": 2000\n}"
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/employee/bookings/:bookingId/cancel",
+              "host": ["{{BASE_URL}}"],
+              "path": ["employee", "bookings", ":bookingId", "cancel"],
+              "variable": [
+                {
+                  "key": "bookingId",
+                  "value": "booking_id_here"
+                }
+              ]
+            },
+            "description": "Cancel a hotel booking as employee"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Booking Statistics & Reports",
+      "item": [
+        {
+          "name": "Get Booking Statistics",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{USER_TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{BASE_URL}}/bookings/stats",
+              "host": ["{{BASE_URL}}"],
+              "path": ["bookings", "stats"]
+            },
+            "description": "Get booking statistics including hotel and bike booking counts"
+          }
+        },
+        {
+          "name": "Get All User Bookings",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{USER_TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{BASE_URL}}/bookings?type=hotel&status=all&limit=10&page=1&sort=-createdAt",
+              "host": ["{{BASE_URL}}"],
+              "path": ["bookings"],
+              "query": [
+                {
+                  "key": "type",
+                  "value": "hotel",
+                  "description": "Filter by booking type (hotel, bike, or all)"
+                },
+                {
+                  "key": "status",
+                  "value": "all",
+                  "description": "Filter by status"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "sort",
+                  "value": "-createdAt"
+                }
+              ]
+            },
+            "description": "Get all user bookings with filtering options"
+          }
+        }
+      ]
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{USER_TOKEN}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// You can add pre-request scripts here",
+          "// For example, to automatically set timestamps:",
+          "// pm.globals.set('timestamp', new Date().toISOString());"
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Global test scripts",
+          "pm.test('Status code is successful', function () {",
+          "    pm.expect(pm.response.code).to.be.oneOf([200, 201, 202]);",
+          "});",
+          "",
+          "pm.test('Response has success field', function () {",
+          "    const jsonData = pm.response.json();",
+          "    pm.expect(jsonData).to.have.property('success');",
+          "});"
+        ]
+      }
+    }
+  ]
+}
