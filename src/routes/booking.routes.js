@@ -30,7 +30,7 @@ router.get("/hotels", protect, getHotelBookings);
 router.get("/bikes", protect, getBikeBookings);
 router.get("/:id", protect, getBooking);
 router.put("/:id/status", protect, updateBookingStatus);
-router.put("/:id/documents", protect, uploadDocuments);p
+router.put("/:id/documents", protect, uploadDocuments);
 router.put("/:id/hotel-details", protect, updateHotelBookingDetails);
 
 // Employee routes
