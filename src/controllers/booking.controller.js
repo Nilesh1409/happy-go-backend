@@ -40,7 +40,7 @@ export const createBooking = asyncHandler(async (req, res) => {
   } = req.body;
 
   // Validate booking type
-  if (!bookingType || !["bike", "hotel"].includes(bookingType)) {
+  if (!bookingType || !["bike", "hotel", "hostel"].includes(bookingType)) {
     throw new ApiError("Invalid booking type", 400);
   }
 
@@ -459,8 +459,8 @@ export const createBooking = asyncHandler(async (req, res) => {
       success: true,
       data: booking,
     });
-  } else if (bookingType === "hotel") {
-    // Hotel booking logic remains unchanged
+  } else if (bookingType === "hotel" || bookingType === "hostel") {
+    // Hotel/Hostel booking logic
     if (
       !hotelId ||
       !roomType ||
@@ -470,21 +470,32 @@ export const createBooking = asyncHandler(async (req, res) => {
       !hotelDetails
     ) {
       throw new ApiError(
-        "Please provide all required fields for hotel booking",
+        `Please provide all required fields for ${bookingType} booking`,
         400
       );
     }
 
-    // Check if hotel exists
+    // Validate stayType for hostel bookings
+    if (bookingType === "hostel" && hotelDetails.stayType && 
+        !["hostel", "workstation"].includes(hotelDetails.stayType)) {
+      throw new ApiError("Invalid stay type. Must be 'hostel' or 'workstation'", 400);
+    }
+
+    // Check if hotel/hostel exists
     const hotel = await Hotel.findById(hotelId);
     if (!hotel) {
-      throw new ApiError("Hotel not found", 404);
+      throw new ApiError(`${bookingType.charAt(0).toUpperCase() + bookingType.slice(1)} not found`, 404);
     }
 
     // Check if room type exists
     const room = hotel.rooms.find((r) => r.type === roomType);
     if (!room) {
       throw new ApiError("Room type not found", 404);
+    }
+
+    // For workstation bookings, verify room is workstation-friendly
+    if (hotelDetails.stayType === "workstation" && !room.isWorkstationFriendly) {
+      throw new ApiError("Selected room is not available for workstation stays", 400);
     }
 
     // Calculate total rooms needed based on room options
@@ -495,7 +506,7 @@ export const createBooking = asyncHandler(async (req, res) => {
 
     // Check if enough rooms are available
     const existingBookings = await Booking.find({
-      bookingType: "hotel",
+      bookingType: { $in: ["hotel", "hostel"] },
       hotel: hotelId,
       roomType,
       $or: [
@@ -514,8 +525,7 @@ export const createBooking = asyncHandler(async (req, res) => {
         totalBookedRooms +=
           (booking.hotelDetails.roomOptions.bedOnly?.quantity || 0) +
           (booking.hotelDetails.roomOptions.bedAndBreakfast?.quantity || 0) +
-          (booking.hotelDetails.roomOptions.bedBreakfastAndDinner?.quantity ||
-            0);
+          (booking.hotelDetails.roomOptions.bedBreakfastAndDinner?.quantity || 0);
       } else {
         // For backward compatibility with old bookings
         totalBookedRooms += 1;
@@ -531,7 +541,13 @@ export const createBooking = asyncHandler(async (req, res) => {
       );
     }
 
-    // Create hotel booking
+    // Initialize payment details for partial payment support
+    const totalAmount = priceDetails.totalAmount;
+    const partialPaymentPercentage = 25; // 25% initial payment
+    const partialAmount = Math.round((totalAmount * partialPaymentPercentage) / 100);
+    const remainingAmount = totalAmount - partialAmount;
+
+    // Create hotel/hostel booking with payment tracking
     const booking = await Booking.create({
       user: req.user._id,
       bookingType,
@@ -546,30 +562,52 @@ export const createBooking = asyncHandler(async (req, res) => {
       specialRequests,
       guestDetails,
       bookingStatus: "pending",
+      paymentStatus: "pending",
+      // Initialize payment details
+      paymentDetails: {
+        totalAmount: totalAmount,
+        paidAmount: 0,
+        remainingAmount: totalAmount,
+        partialPaymentPercentage: partialPaymentPercentage,
+        paymentHistory: []
+      }
     });
 
     // Send confirmation email
     const user = await User.findById(req.user._id);
     const emailMessage = `
-      <h1>Hotel Booking Confirmation</h1>
+      <h1>${bookingType.charAt(0).toUpperCase() + bookingType.slice(1)} Booking Created</h1>
       <p>Dear ${user.name},</p>
-      <p>Your hotel booking has been confirmed.</p>
+      <p>Your ${bookingType} booking has been created and is pending payment.</p>
       <p>Booking ID: ${booking._id}</p>
-      <p>Start Date: ${new Date(startDate).toLocaleDateString()}</p>
-      <p>End Date: ${new Date(endDate).toLocaleDateString()}</p>
+      <p>Check-in Date: ${new Date(startDate).toLocaleDateString()}</p>
+      <p>Check-out Date: ${new Date(endDate).toLocaleDateString()}</p>
       <p>Total Amount: ₹${priceDetails.totalAmount}</p>
+      <p>You can pay 25% (₹${partialAmount}) now to confirm your booking, or pay the full amount.</p>
       <p>Thank you for choosing HappyGo!</p>
     `;
 
     await sendEmail({
       email: user.email,
-      subject: "HappyGo Hotel Booking Confirmation",
+      subject: `HappyGo ${bookingType.charAt(0).toUpperCase() + bookingType.slice(1)} Booking Created`,
       message: emailMessage,
     });
 
     return res.status(201).json({
       success: true,
-      data: booking,
+      data: {
+        ...booking.toObject(),
+        paymentOptions: {
+          partialPayment: {
+            amount: partialAmount,
+            percentage: partialPaymentPercentage
+          },
+          fullPayment: {
+            amount: totalAmount,
+            percentage: 100
+          }
+        }
+      },
     });
   }
 });

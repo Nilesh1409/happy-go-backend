@@ -88,14 +88,15 @@ function formatTime(time) {
     hour12: true,
   });
 }
-// @desc    Create payment order for booking
+// @desc    Create payment order for booking (supports partial and full payment)
 // @route   POST /api/payments/booking/:id
 // @access  Private
 export const createBookingPayment = asyncHandler(async (req, res) => {
+  const { paymentType = "full" } = req.body; // "partial" or "full"
+  
   // Get booking
   const booking = await Booking.findById(req.params.id);
   console.log("🚀 ~ createBookingPayment ~ req:", req?.user);
-  // console.log("🚀 ~ createBookingPayment ~ booking:", booking);
 
   if (!booking) {
     throw new ApiError("Booking not found", 404);
@@ -111,17 +112,72 @@ export const createBookingPayment = asyncHandler(async (req, res) => {
     throw new ApiError("Payment already completed for this booking", 400);
   }
 
+  let paymentAmount;
+  let paymentTypeForHistory;
+
+  if (paymentType === "partial") {
+    // Calculate partial payment amount (25% of total)
+    const totalAmount = booking.paymentDetails?.totalAmount || booking.priceDetails.totalAmount;
+    const partialPercentage = booking.paymentDetails?.partialPaymentPercentage || 25;
+    paymentAmount = Math.round((totalAmount * partialPercentage) / 100);
+    paymentTypeForHistory = "partial";
+    
+    // Check if partial payment is already made
+    if (booking.paymentStatus === "partial") {
+      throw new ApiError("Partial payment already completed. Use remaining payment option.", 400);
+    }
+  } else if (paymentType === "remaining") {
+    // Calculate remaining payment amount
+    if (booking.paymentStatus !== "partial") {
+      throw new ApiError("No partial payment found. Cannot process remaining payment.", 400);
+    }
+    
+    paymentAmount = booking.paymentDetails?.remainingAmount || 0;
+    paymentTypeForHistory = "remaining";
+    
+    if (paymentAmount <= 0) {
+      throw new ApiError("No remaining amount to pay", 400);
+    }
+  } else {
+    // Full payment
+    paymentAmount = booking.paymentDetails?.totalAmount || booking.priceDetails.totalAmount;
+    paymentTypeForHistory = "full";
+  }
+
   // Create Razorpay order
   const options = {
-    amount: Math.round(booking.priceDetails.totalAmount * 100), // amount in smallest currency unit (paise) - must be integer
+    amount: Math.round(paymentAmount * 100), // amount in smallest currency unit (paise) - must be integer
     currency: "INR",
-    receipt: `booking_${booking._id}`,
+    receipt: `${paymentType}_${booking._id}_${Date.now()}`,
     payment_capture: 1, // auto capture
   };
 
   console.log("payments about to end");
 
   const order = await razorpay.orders.create(options);
+
+  // Store payment intent in booking for verification later
+  if (!booking.paymentDetails) {
+    booking.paymentDetails = {
+      totalAmount: booking.priceDetails.totalAmount,
+      paidAmount: 0,
+      remainingAmount: booking.priceDetails.totalAmount,
+      partialPaymentPercentage: 25,
+      paymentHistory: []
+    };
+  }
+
+  // Add pending payment to history
+  booking.paymentDetails.paymentHistory.push({
+    paymentId: order.id,
+    amount: paymentAmount,
+    paymentType: paymentTypeForHistory,
+    razorpayOrderId: order.id,
+    status: "pending",
+    createdAt: new Date()
+  });
+
+  await booking.save();
 
   res.status(200).json({
     success: true,
@@ -131,6 +187,8 @@ export const createBookingPayment = asyncHandler(async (req, res) => {
       currency: order.currency,
       receipt: order.receipt,
       bookingId: booking._id,
+      paymentType: paymentTypeForHistory,
+      paymentAmount: paymentAmount,
     },
   });
 });
@@ -288,7 +346,7 @@ export const createOrderPayment = asyncHandler(async (req, res) => {
   });
 });
 
-// @desc    Verify payment for booking
+// @desc    Verify payment for booking (supports partial and full payment)
 // @route   POST /api/payments/booking/:id/verify
 // @access  Private
 export const verifyBookingPayment = asyncHandler(async (req, res) => {
@@ -306,246 +364,123 @@ export const verifyBookingPayment = asyncHandler(async (req, res) => {
     throw new ApiError("Invalid payment signature", 400);
   }
 
-  // Get booking with bike details populated
+  // Get booking with details populated
   const booking = await Booking.findById(req.params.id)
     .populate("user")
     .populate("bike")
-    .populate("bikeItems.bike"); // This will populate bike details for multiple bikes
+    .populate("hotel")
+    .populate("bikeItems.bike");
 
   if (!booking) throw new ApiError("Booking not found", 404);
 
-  // Update booking payment status
-  booking.paymentStatus = "completed";
-  booking.paymentId = razorpay_payment_id;
-  booking.bookingStatus = "confirmed";
+  // Find the payment in history
+  const paymentHistoryItem = booking.paymentDetails?.paymentHistory?.find(
+    (payment) => payment.razorpayOrderId === razorpay_order_id
+  );
+
+  if (!paymentHistoryItem) {
+    throw new ApiError("Payment record not found", 404);
+  }
+
+  // Update payment history item
+  paymentHistoryItem.razorpayPaymentId = razorpay_payment_id;
+  paymentHistoryItem.status = "completed";
+  paymentHistoryItem.paidAt = new Date();
+
+  // Update booking payment details
+  const paidAmount = paymentHistoryItem.amount;
+  booking.paymentDetails.paidAmount += paidAmount;
+  booking.paymentDetails.remainingAmount = Math.max(0, 
+    booking.paymentDetails.totalAmount - booking.paymentDetails.paidAmount
+  );
+
+  // Determine payment status
+  if (paymentHistoryItem.paymentType === "partial") {
+    booking.paymentStatus = "partial";
+    booking.bookingStatus = "confirmed"; // Confirm booking on partial payment
+  } else if (paymentHistoryItem.paymentType === "remaining" || paymentHistoryItem.paymentType === "full") {
+    booking.paymentStatus = "completed";
+    booking.bookingStatus = "confirmed";
+  }
+
+  // Set primary payment ID for backward compatibility
+  if (!booking.paymentId) {
+    booking.paymentId = razorpay_payment_id;
+  }
+
   await booking.save();
 
-  // Prepare variables for template
+  // Prepare email content based on payment type
   const user = booking.user;
-  const price = booking.priceDetails || {};
-  const bikeDetails = booking.bikeDetails || {};
-  const bikeInfo = booking.bike || {}; // This is the populated bike document
-
-  const __filename = fileURLToPath(import.meta.url);
-  const __dirname = path.dirname(__filename);
-
-  // Calculate total days
-  const totalDays = calculateDays(booking.startDate, booking.endDate);
-
-  // Process bike data for template
-  let bikeDetailsHtml = "";
-  let totalBikes = 1;
-  let bikeTypes = 1;
-
-  if (booking.bikeItems && booking.bikeItems.length > 0) {
-    // Multiple bikes
-    totalBikes = booking.bikeItems.reduce(
-      (sum, item) => sum + item.quantity,
-      0
-    );
-    bikeTypes = booking.bikeItems.length;
-
-    bikeDetailsHtml = booking.bikeItems
-      .map((item) => {
-        const bike = item.bike || {};
-        const kmType =
-          item.kmOption === "unlimited"
-            ? "Unlimited KM"
-            : `Limited KM (${item.kmLimit || 60} km/day)`;
-
-        return `
-        <div class="bike-card" style="margin-bottom: 16px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; text-align: center;">
-          <div class="bike-title" style="font-size: 20px; font-weight: 600; margin-bottom: 8px;">${
-            bike.title || "Bike"
-          }</div>
-          <div class="bike-details" style="font-size: 16px; color: #64748b;">
-            ${bike.brand || ""} ${bike.model || ""} ${
-          bike.year ? `| ${bike.year}` : ""
-        }
-          </div>
-          <div style="margin-top: 8px;">
-            <span style="background: #f47b20; color: white; padding: 4px 8px; border-radius: 4px; font-size: 12px; margin-right: 8px;">
-              ${item.quantity} Bike${item.quantity > 1 ? "s" : ""}
-            </span>
-            <span style="background: #e2e8f0; color: #64748b; padding: 4px 8px; border-radius: 4px; font-size: 12px;">
-              ${kmType}
-            </span>
-          </div>
-          ${
-            bike.registrationNumber
-              ? `<div style="margin-top: 8px; font-size: 14px; color: #64748b;">Registration: ${bike.registrationNumber}</div>`
-              : ""
-          }
-        </div>
-      `;
-      })
-      .join("");
-
-    bikeDetailsHtml += `
-      <div style="text-align: center; margin-top: 16px; padding: 12px; background: #f8fafc; border-radius: 8px; font-weight: 600; border: 2px solid #f47b20;">
-        Total: ${totalBikes} Bike${
-      totalBikes > 1 ? "s" : ""
-    } | ${bikeTypes} Type${bikeTypes > 1 ? "s" : ""}
-      </div>
+  const isPartialPayment = paymentHistoryItem.paymentType === "partial";
+  const isRemainingPayment = paymentHistoryItem.paymentType === "remaining";
+  
+  let emailSubject, emailContent;
+  
+  if (isPartialPayment) {
+    emailSubject = "🎉 Booking Confirmed with Partial Payment - Happy Go";
+    emailContent = `
+      <h1>Booking Confirmed - Partial Payment Received</h1>
+      <p>Dear ${user.name},</p>
+      <p>Your ${booking.bookingType} booking has been confirmed with partial payment!</p>
+      <p>Booking ID: ${booking._id}</p>
+      <p>Paid Amount: ₹${paidAmount} (${paymentHistoryItem.paymentType === "partial" ? "25%" : ""})</p>
+      <p>Remaining Amount: ₹${booking.paymentDetails.remainingAmount}</p>
+      <p>You can pay the remaining amount anytime before your ${booking.bookingType === "bike" ? "pickup" : "check-in"} date.</p>
+      <p>Thank you for choosing HappyGo!</p>
+    `;
+  } else if (isRemainingPayment) {
+    emailSubject = "✅ Full Payment Completed - Happy Go";
+    emailContent = `
+      <h1>Payment Completed Successfully</h1>
+      <p>Dear ${user.name},</p>
+      <p>Your remaining payment has been processed successfully!</p>
+      <p>Booking ID: ${booking._id}</p>
+      <p>Remaining Amount Paid: ₹${paidAmount}</p>
+      <p>Total Paid: ₹${booking.paymentDetails.paidAmount}</p>
+      <p>Your booking is now fully paid and confirmed.</p>
+      <p>Thank you for choosing HappyGo!</p>
     `;
   } else {
-    // Single bike
-    const packageType = bikeDetails.isUnlimited
-      ? "Unlimited KM Package"
-      : `Limited KM Package (${bikeDetails.kmLimit || 60} km/day)`;
-    bikeDetailsHtml = `
-      <div class="bike-card" style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; text-align: center;">
-        <div class="bike-title" style="font-size: 20px; font-weight: 600; margin-bottom: 8px;">${
-          bikeInfo.title || "Bike"
-        }</div>
-        <div class="bike-details" style="font-size: 16px; color: #64748b;">
-          ${bikeInfo.brand || ""} ${bikeInfo.model || ""} ${
-      bikeInfo.year ? `| ${bikeInfo.year}` : ""
-    }
-        </div>
-        <div style="margin-top: 8px;">
-          <span style="background: #e2e8f0; color: #64748b; padding: 4px 8px; border-radius: 4px; font-size: 12px;">
-            ${packageType}
-          </span>
-        </div>
-        ${
-          bikeInfo.registrationNumber
-            ? `<div style="margin-top: 8px; font-size: 14px; color: #64748b;">Registration: ${bikeInfo.registrationNumber}</div>`
-            : ""
-        }
-      </div>
+    emailSubject = "🎉 Booking Confirmed - Full Payment - Happy Go";
+    emailContent = `
+      <h1>Booking Confirmed - Full Payment Received</h1>
+      <p>Dear ${user.name},</p>
+      <p>Your ${booking.bookingType} booking has been confirmed with full payment!</p>
+      <p>Booking ID: ${booking._id}</p>
+      <p>Total Amount Paid: ₹${paidAmount}</p>
+      <p>Thank you for choosing HappyGo!</p>
     `;
   }
 
-  const variables = {
-    // Customer Information
-    customerName: user.name || "",
-    customerEmail: user.email || "",
-    customerMobile: user.mobile || "",
-
-    // Booking Information
-    bookingId: booking._id.toString(),
-    paymentId: razorpay_payment_id,
-    paymentDate: new Date().toLocaleDateString("en-IN", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    }),
-
-    // Bike Information - processed HTML
-    bikeDetailsHtml: bikeDetailsHtml,
-    totalBikes: totalBikes.toString(),
-    bikeTypes: bikeTypes.toString(),
-
-    // Single Bike Information (fallback for legacy bookings)
-    bikeTitle: bikeInfo.title || bikeInfo.name || "Bike",
-    bikeBrand: bikeInfo.brand || "",
-    bikeModel: bikeInfo.model || "",
-    bikeYear: bikeInfo.year || "",
-    bikeRegistration: bikeInfo.registrationNumber || bikeInfo.regNumber || "",
-
-    // Rental Period
-    pickupDate: formatDate(booking.startDate),
-    pickupTime: formatTime(booking.startTime),
-    dropoffDate: formatDate(booking.endDate),
-    dropoffTime: formatTime(booking.endTime),
-    totalDays: totalDays.toString(),
-
-    // Price Details (mapping to your actual structure)
-    baseAmount: price.basePrice || "0",
-    taxAmount: price.taxes || "0",
-    gstAmount: price.taxes || "0", // Using taxes as GST
-    discountAmount: price.discount || "",
-    additionalCharges: bikeDetails.additionalCharges?.amount || "",
-    helmetCharges: price.helmetCharges || "0",
-    securityDeposit: "", // Not in your structure, keeping empty
-    totalAmount: price.totalAmount || "0",
-
-    // Conditional pricing rows HTML
-    helmetChargesRow:
-      price.helmetCharges && price.helmetCharges !== "0"
-        ? `
-      <tr class="row">
-        <td class="label">Helmet Rental</td>
-        <td class="value">₹${price.helmetCharges}</td>
-      </tr>
-    `
-        : "",
-    discountRow:
-      price.discount && price.discount !== "0"
-        ? `
-      <tr class="row">
-        <td class="label">Discount Applied</td>
-        <td class="value" style="color: #16a34a">-₹${price.discount}</td>
-      </tr>
-    `
-        : "",
-    securityDepositRow: "", // Always empty for now
-
-    // Package Information (for single bike)
-    packageType: bikeDetails.isUnlimited
-      ? "Unlimited KM"
-      : `Limited KM (${bikeDetails.kmLimit || 60} km/day)`,
-
-    // URLs
-    bookingUrl: `${
-      process.env.FRONTEND_URL || "https://happygobikes.netlify.app"
-    }/booking/confirmed/${booking._id}`,
-    websiteUrl: process.env.FRONTEND_URL || "https://happygobikes.netlify.app",
-    bookingsUrl: `${
-      process.env.FRONTEND_URL || "https://happygobikes.netlify.app"
-    }/bookings`,
-    supportUrl: `${
-      process.env.FRONTEND_URL || "https://happygobikes.netlify.app"
-    }/support`,
-    termsUrl: `${
-      process.env.FRONTEND_URL || "https://happygobikes.netlify.app"
-    }/terms`,
-    privacyUrl: `${
-      process.env.FRONTEND_URL || "https://happygobikes.netlify.app"
-    }/privacy`,
-    trackingUrl: `${
-      process.env.FRONTEND_URL || "https://happygobikes.netlify.app"
-    }/bookings`,
-  };
-
-  console.log("🚀 ~ Email Variables:", variables);
-
   try {
-    // Path to booking confirmation template
-    const bookingTemplatePath = path.join(
-      __dirname,
-      "../templates/booking-confirmation-email.html"
-    );
-
-    // Check if template file exists
-    if (!fs.existsSync(bookingTemplatePath)) {
-      console.error("Booking template not found at:", bookingTemplatePath);
-      throw new ApiError("Booking email template not found", 500);
-    }
-
-    // Fill template
-    const bookingEmailHtml = fillTemplate(bookingTemplatePath, variables);
-
-    // Send Booking Confirmation Email only
+    // Send confirmation email
     await sendEmail({
       email: user.email,
-      subject: "🎉 Booking Confirmed - Happy Go Bike Rentals",
-      message: bookingEmailHtml,
+      subject: emailSubject,
+      message: emailContent,
       isHtml: true,
     });
 
-    console.log("✅ Booking confirmation email sent to:", user.email);
+    console.log("✅ Payment confirmation email sent to:", user.email);
   } catch (emailError) {
     console.error("❌ Email sending failed:", emailError);
     // Don't throw error here, payment is already processed
-    // Just log the error and continue
   }
 
   res.status(200).json({
     success: true,
-    message: "Payment verified and booking confirmation email sent",
-    data: booking,
+    message: `${paymentHistoryItem.paymentType.charAt(0).toUpperCase() + paymentHistoryItem.paymentType.slice(1)} payment verified successfully`,
+    data: {
+      booking: booking,
+      paymentDetails: {
+        paymentType: paymentHistoryItem.paymentType,
+        paidAmount: paidAmount,
+        totalPaid: booking.paymentDetails.paidAmount,
+        remainingAmount: booking.paymentDetails.remainingAmount,
+        paymentStatus: booking.paymentStatus
+      }
+    },
   });
 });
 

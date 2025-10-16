@@ -68,16 +68,22 @@ export const getHotel = asyncHandler(async (req, res) => {
   });
 });
 
-// @desc    Get available hotels
-// @route   GET /api/hotels/available
+// @desc    Get available hostels/hotels
+// @route   GET /api/hostels/available
 // @access  Public
-export const getAvailableHotels = asyncHandler(async (req, res) => {
-  const { checkIn, checkOut, people } = req.query;
+export const getAvailableHostels = asyncHandler(async (req, res) => {
+  const { 
+    checkIn, 
+    checkOut, 
+    people = 1, 
+    location = "Chikkamagaluru",
+    stayType = "hostel" // hostel or workstation
+  } = req.query;
 
   // Validate required fields
   if (!checkIn || !checkOut) {
     throw new ApiError(
-      "Please provide check-in date, check-out date, and number of people",
+      "Please provide check-in date and check-out date",
       400
     );
   }
@@ -85,20 +91,40 @@ export const getAvailableHotels = asyncHandler(async (req, res) => {
   // Convert to Date objects
   const checkInDate = new Date(checkIn);
   const checkOutDate = new Date(checkOut);
-  const numberOfPeople = Number.parseInt(people);
+  const numberOfPeople = parseInt(people);
 
   // Validate dates
   if (checkInDate >= checkOutDate) {
     throw new ApiError("Check-in date must be before check-out date", 400);
   }
 
-  // Find all hotels
-  const hotels = await Hotel.find({ isActive: true });
+  // Check if dates are in the future
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  if (checkInDate < today) {
+    throw new ApiError("Check-in date cannot be in the past", 400);
+  }
 
-  console.log("🚀 ~ getAvailableHotels ~ hotels:", hotels);
+  // Find hostels/hotels by location
+  const query = { 
+    isActive: true,
+    location: new RegExp(location, 'i') // Case-insensitive location search
+  };
+
+  const hostels = await Hotel.find(query);
+
+  if (hostels.length === 0) {
+    return res.status(200).json({
+      success: true,
+      count: 0,
+      data: [],
+      message: `No hostels found in ${location}`,
+    });
+  }
+
   // Find all bookings that overlap with the requested time period
   const bookings = await Booking.find({
-    bookingType: "hotel",
+    bookingType: { $in: ["hotel", "hostel"] },
     $or: [
       {
         startDate: { $lte: checkOutDate },
@@ -122,23 +148,37 @@ export const getAvailableHotels = asyncHandler(async (req, res) => {
       bookedRooms[hotelId][roomType] = 0;
     }
 
-    bookedRooms[hotelId][roomType]++;
+    // Count total beds/rooms booked
+    if (booking.hotelDetails && booking.hotelDetails.roomOptions) {
+      const roomOptions = booking.hotelDetails.roomOptions;
+      bookedRooms[hotelId][roomType] += 
+        (roomOptions.bedOnly?.quantity || 0) +
+        (roomOptions.bedAndBreakfast?.quantity || 0) +
+        (roomOptions.bedBreakfastAndDinner?.quantity || 0);
+    } else {
+      bookedRooms[hotelId][roomType] += 1;
+    }
   });
 
-  // Filter hotels with available rooms
-  const availableHotels = hotels
-    .map((hotel) => {
-      const hotelObj = hotel.toObject();
+  // Filter hostels with available rooms
+  const availableHostels = hostels
+    .map((hostel) => {
+      const hostelObj = hostel.toObject();
 
-      // Filter rooms that can accommodate the number of people and have availability
-      hotelObj.rooms = hotelObj.rooms.filter((room) => {
+      // Filter rooms based on stay type and availability
+      hostelObj.rooms = hostelObj.rooms.filter((room) => {
+        // Filter by stay type for workstation requirements
+        if (stayType === "workstation" && !room.isWorkstationFriendly) {
+          return false;
+        }
+
         // Check if room can accommodate the number of people
         if (room.capacity < numberOfPeople) {
           return false;
         }
 
         // Calculate number of booked rooms
-        const hotelId = hotel._id.toString();
+        const hotelId = hostel._id.toString();
         const roomType = room.type;
         const bookedCount =
           bookedRooms[hotelId] && bookedRooms[hotelId][roomType]
@@ -146,35 +186,69 @@ export const getAvailableHotels = asyncHandler(async (req, res) => {
             : 0;
 
         // Check if there are available rooms
-        return room.totalRooms - bookedCount > 0;
+        const availableCount = room.totalRooms - bookedCount;
+        room.availableRooms = Math.max(0, availableCount);
+        
+        return availableCount > 0;
       });
 
-      // Update available rooms count
-      hotelObj.rooms.forEach((room) => {
-        const hotelId = hotel._id.toString();
-        const roomType = room.type;
-        const bookedCount =
-          bookedRooms[hotelId] && bookedRooms[hotelId][roomType]
-            ? bookedRooms[hotelId][roomType]
-            : 0;
+      // Calculate total nights
+      const nights = Math.ceil((checkOutDate - checkInDate) / (1000 * 60 * 60 * 24));
+      
+      // Add calculated pricing for each room
+      hostelObj.rooms.forEach((room) => {
+        // Calculate prices with discounts
+        const bedOnlyPrice = room.priceOptions.bedOnly.discountedPrice || room.priceOptions.bedOnly.basePrice;
+        const bedBreakfastPrice = room.priceOptions.bedAndBreakfast.discountedPrice || room.priceOptions.bedAndBreakfast.basePrice;
+        const bedBreakfastDinnerPrice = room.priceOptions.bedBreakfastAndDinner.discountedPrice || room.priceOptions.bedBreakfastAndDinner.basePrice;
 
-        room.availableRooms = room.totalRooms - bookedCount;
+        room.calculatedPricing = {
+          bedOnly: {
+            pricePerNight: bedOnlyPrice,
+            totalPrice: bedOnlyPrice * nights,
+            savings: room.priceOptions.bedOnly.basePrice > bedOnlyPrice ? 
+              (room.priceOptions.bedOnly.basePrice - bedOnlyPrice) * nights : 0
+          },
+          bedAndBreakfast: {
+            pricePerNight: bedBreakfastPrice,
+            totalPrice: bedBreakfastPrice * nights,
+            savings: room.priceOptions.bedAndBreakfast.basePrice > bedBreakfastPrice ? 
+              (room.priceOptions.bedAndBreakfast.basePrice - bedBreakfastPrice) * nights : 0
+          },
+          bedBreakfastAndDinner: {
+            pricePerNight: bedBreakfastDinnerPrice,
+            totalPrice: bedBreakfastDinnerPrice * nights,
+            savings: room.priceOptions.bedBreakfastAndDinner.basePrice > bedBreakfastDinnerPrice ? 
+              (room.priceOptions.bedBreakfastAndDinner.basePrice - bedBreakfastDinnerPrice) * nights : 0
+          }
+        };
       });
 
-      return hotelObj;
+      // Add booking details
+      hostelObj.bookingDetails = {
+        checkIn: checkInDate,
+        checkOut: checkOutDate,
+        nights: nights,
+        guests: numberOfPeople,
+        stayType: stayType
+      };
+
+      return hostelObj;
     })
-    .filter((hotel) => hotel.rooms.length > 0);
-
-  console.log(
-    "🚀 ~ getAvailableHotels ~ availableHotels:",
-    availableHotels,
-    hotels
-  );
+    .filter((hostel) => hostel.rooms.length > 0);
 
   res.status(200).json({
     success: true,
-    count: availableHotels.length,
-    data: availableHotels,
+    count: availableHostels.length,
+    data: availableHostels,
+    searchCriteria: {
+      location,
+      checkIn: checkInDate,
+      checkOut: checkOutDate,
+      people: numberOfPeople,
+      stayType,
+      nights: Math.ceil((checkOutDate - checkInDate) / (1000 * 60 * 60 * 24))
+    },
   });
 });
 

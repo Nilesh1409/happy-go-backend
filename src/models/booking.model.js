@@ -75,7 +75,7 @@ const bookingSchema = new mongoose.Schema(
     bookingType: {
       type: String,
       required: [true, "Please add a booking type"],
-      enum: ["bike", "hotel"],
+      enum: ["bike", "hotel", "hostel"],
     },
     // For bike bookings - supports both single bike and multiple bikes
     bike: {
@@ -86,18 +86,18 @@ const bookingSchema = new mongoose.Schema(
       },
     },
     bikeItems: [bookingItemSchema],
-    // For hotel bookings (unchanged)
+    // For hotel/hostel bookings
     hotel: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Hotel",
       required: function () {
-        return this.bookingType === "hotel"
+        return this.bookingType === "hotel" || this.bookingType === "hostel"
       },
     },
     roomType: {
       type: String,
       required: function () {
-        return this.bookingType === "hotel"
+        return this.bookingType === "hotel" || this.bookingType === "hostel"
       },
     },
     startDate: {
@@ -123,7 +123,7 @@ const bookingSchema = new mongoose.Schema(
     numberOfPeople: {
       type: Number,
       required: function () {
-        return this.bookingType === "hotel"
+        return this.bookingType === "hotel" || this.bookingType === "hostel"
       },
       min: [1, "Number of people must be at least 1"],
     },
@@ -181,11 +181,68 @@ const bookingSchema = new mongoose.Schema(
     },
     paymentStatus: {
       type: String,
-      enum: ["pending", "completed", "failed", "refunded"],
+      enum: ["pending", "partial", "completed", "failed", "refunded"],
       default: "pending",
     },
     paymentId: {
       type: String,
+    },
+    // Partial payment tracking
+    paymentDetails: {
+      totalAmount: {
+        type: Number,
+        required: true,
+        default: 0,
+      },
+      paidAmount: {
+        type: Number,
+        default: 0,
+      },
+      remainingAmount: {
+        type: Number,
+        default: 0,
+      },
+      partialPaymentPercentage: {
+        type: Number,
+        default: 25, // 25% initial payment
+        min: 1,
+        max: 100,
+      },
+      paymentHistory: [
+        {
+          paymentId: {
+            type: String,
+            required: true,
+          },
+          amount: {
+            type: Number,
+            required: true,
+          },
+          paymentType: {
+            type: String,
+            enum: ["partial", "remaining", "full"],
+            required: true,
+          },
+          razorpayOrderId: {
+            type: String,
+          },
+          razorpayPaymentId: {
+            type: String,
+          },
+          status: {
+            type: String,
+            enum: ["pending", "completed", "failed"],
+            default: "pending",
+          },
+          paidAt: {
+            type: Date,
+          },
+          createdAt: {
+            type: Date,
+            default: Date.now,
+          },
+        },
+      ],
     },
     bookingStatus: {
       type: String,
@@ -250,7 +307,7 @@ const bookingSchema = new mongoose.Schema(
         },
       },
     },
-    // Hotel details (unchanged)
+    // Hotel/Hostel details
     hotelDetails: {
       roomOptions: {
         bedOnly: {
@@ -286,6 +343,14 @@ const bookingSchema = new mongoose.Schema(
       },
       checkInTime: {
         type: String,
+      },
+      stayType: {
+        type: String,
+        enum: ["hostel", "workstation"],
+        default: "hostel",
+        required: function () {
+          return this.bookingType === "hostel"
+        },
       },
     },
     couponCode: {

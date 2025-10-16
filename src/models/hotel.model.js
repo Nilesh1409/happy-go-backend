@@ -11,6 +11,11 @@ const roomSchema = new mongoose.Schema(
         "Mixed A/C Dormitory",
         "Deluxe Double A/C Room with Ensuite Bathroom",
         "Bed in 6 Bed Mixed A/C Dormitory Room with Ensuite Bathroom",
+        "Bed in 4 Bed Mixed A/C Dormitory Room with Ensuite Bathroom",
+        "Deluxe Private A/C Room with Ensuite Bathroom",
+        "Private Room",
+        "Shared Dormitory",
+        "Workstation Bed",
       ],
     },
     description: {
@@ -68,6 +73,12 @@ const roomSchema = new mongoose.Schema(
       required: [true, "Please add available rooms"],
       min: [0, "Available rooms cannot be negative"],
     },
+    // Hostel specific features
+    isWorkstationFriendly: {
+      type: Boolean,
+      default: false,
+    },
+    workstationAmenities: [String], // Wi-Fi, Power outlets, Desk space, etc.
   },
   {
     _id: true,
@@ -89,6 +100,7 @@ const hotelSchema = new mongoose.Schema(
     location: {
       type: String,
       required: [true, "Please add a location"],
+      default: "Chikkamagaluru",
     },
     address: {
       type: String,
@@ -109,12 +121,16 @@ const hotelSchema = new mongoose.Schema(
         icon: {
           type: String,
         },
+        description: {
+          type: String,
+        },
       },
     ],
     rooms: [roomSchema],
     guidelines: [String],
     checkInGuidelines: [String],
     cancellationPolicies: [String],
+    propertyGuidelines: [String], // Additional guidelines for hostel stays
     ratings: {
       type: Number,
       min: [1, "Rating must be at least 1"],
@@ -128,6 +144,32 @@ const hotelSchema = new mongoose.Schema(
     isActive: {
       type: Boolean,
       default: true,
+    },
+    // Hostel specific fields
+    propertyType: {
+      type: String,
+      enum: ["hotel", "hostel"],
+      default: "hostel",
+    },
+    checkInTime: {
+      type: String,
+      default: "1:00 PM",
+    },
+    checkOutTime: {
+      type: String,
+      default: "10:00 AM",
+    },
+    // Contact information
+    contactInfo: {
+      phone: String,
+      email: String,
+      whatsapp: String,
+    },
+    // Policies
+    policies: {
+      cancellation: [String],
+      checkIn: [String],
+      house: [String],
     },
   },
   {
