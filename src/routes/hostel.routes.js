@@ -1,26 +1,32 @@
-import express from "express"
+import express from "express";
 import {
-  getHotels,
-  getHotel,
   getAvailableHostels,
-  createHotel,
-  updateHotel,
-  deleteHotel,
-} from "../controllers/hotel.controller.js"
-import { employeeProtect } from "../middleware/auth.middleware.js"
+  getHostel,
+  createHostel,
+  updateHostel,
+  deleteHostel,
+  getAdminHostels,
+  getAdminHostelBookings,
+  getHostelBookingStats,
+  getAdminHostelBooking,
+} from "../controllers/hostel.controller.js";
+import { protect, adminProtect, employeeOrAdminProtect } from "../middleware/auth.middleware.js";
 
-const router = express.Router()
+const router = express.Router();
 
 // Public routes
-router.get("/", getHotels) // Get all hostels
-router.get("/available", getAvailableHostels) // Get available hostels with filters
-router.get("/:id", getHotel) // Get single hostel details
+router.get("/available", getAvailableHostels);
+router.get("/:id", getHostel);
 
-// Admin routes (Employee/Admin only)
-router.post("/", employeeProtect, createHotel) // Create new hostel
-router.put("/:id", employeeProtect, updateHotel) // Update hostel
-router.delete("/:id", employeeProtect, deleteHotel) // Delete hostel
+// Admin/Employee routes - Hostel Management
+router.post("/", employeeOrAdminProtect, createHostel);
+router.put("/:id", employeeOrAdminProtect, updateHostel);
+router.delete("/:id", employeeOrAdminProtect, deleteHostel);
+router.get("/admin/all", employeeOrAdminProtect, getAdminHostels);
 
-export default router
+// Admin/Employee routes - Booking Management
+router.get("/admin/bookings/stats", employeeOrAdminProtect, getHostelBookingStats);
+router.get("/admin/bookings/:id", employeeOrAdminProtect, getAdminHostelBooking);
+router.get("/admin/bookings", employeeOrAdminProtect, getAdminHostelBookings);
 
-
+export default router;

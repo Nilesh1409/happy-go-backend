@@ -1,14 +1,16 @@
 import express from "express";
 import {
   createBooking,
+  createCartBooking,
   getBookings,
   getBooking,
+  getBookingsByPaymentGroup,
   updateBookingStatus,
   uploadDocuments,
   calculateAdditionalCharges,
-  getHotelBookings,
+  getHostelBookings,
   getBikeBookings,
-  updateHotelBookingDetails,
+  updateHostelBookingDetails,
   getBookingStats,
   extendBikeBooking,
   completeBikeBooking,
@@ -25,13 +27,15 @@ const router = express.Router();
 
 // User routes
 router.post("/", protect, createBooking);
+router.post("/cart", protect, createCartBooking); // New: Combined cart checkout
 router.get("/", protect, getBookings);
-router.get("/hotels", protect, getHotelBookings);
+router.get("/hostels", protect, getHostelBookings);
 router.get("/bikes", protect, getBikeBookings);
+router.get("/group/:paymentGroupId", protect, getBookingsByPaymentGroup); // New: Get bookings by payment group
 router.get("/:id", protect, getBooking);
 router.put("/:id/status", protect, updateBookingStatus);
 router.put("/:id/documents", protect, uploadDocuments);
-router.put("/:id/hotel-details", protect, updateHotelBookingDetails);
+router.put("/:id/hostel-details", protect, updateHostelBookingDetails);
 
 // Employee routes
 router.put(
