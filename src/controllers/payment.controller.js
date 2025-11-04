@@ -5,6 +5,7 @@ import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import { sendEmail } from "../utils/sendEmail.js";
 import { sendSMS } from "../utils/sendSMS.js";
+import { generateBookingConfirmationEmail } from "../utils/emailTemplates.js";
 import Razorpay from "razorpay";
 import crypto from "crypto";
 import fs from "fs";
@@ -88,14 +89,15 @@ function formatTime(time) {
     hour12: true,
   });
 }
-// @desc    Create payment order for booking
+// @desc    Create payment order for booking (supports partial and full payment)
 // @route   POST /api/payments/booking/:id
 // @access  Private
 export const createBookingPayment = asyncHandler(async (req, res) => {
+  const { paymentType = "full" } = req.body; // "partial" or "full"
+  
   // Get booking
   const booking = await Booking.findById(req.params.id);
   console.log("🚀 ~ createBookingPayment ~ req:", req?.user);
-  // console.log("🚀 ~ createBookingPayment ~ booking:", booking);
 
   if (!booking) {
     throw new ApiError("Booking not found", 404);
@@ -111,17 +113,137 @@ export const createBookingPayment = asyncHandler(async (req, res) => {
     throw new ApiError("Payment already completed for this booking", 400);
   }
 
+  let paymentAmount;
+  let paymentTypeForHistory;
+
+  if (paymentType === "partial") {
+    // Check if partial payment is already made
+    if (booking.paymentStatus === "partial") {
+      throw new ApiError("Partial payment already completed. Use remaining payment option.", 400);
+    }
+
+    // For COMBINED bookings, calculate partial from combined total
+    if (booking.paymentGroupId) {
+      // Get all bookings in this payment group
+      const allBookings = await Booking.find({
+        paymentGroupId: booking.paymentGroupId,
+      }).select("priceDetails paymentDetails");
+
+      // Calculate combined total
+      const combinedTotal = allBookings.reduce(
+        (sum, b) => sum + (b.priceDetails?.totalAmount || 0),
+        0
+      );
+
+      const partialPercentage = booking.paymentDetails?.partialPaymentPercentage || 25;
+      paymentAmount = Math.round((combinedTotal * partialPercentage) / 100);
+    } else {
+      // Single booking - use individual amount
+      const totalAmount = booking.paymentDetails?.totalAmount || booking.priceDetails.totalAmount;
+      const partialPercentage = booking.paymentDetails?.partialPaymentPercentage || 25;
+      paymentAmount = Math.round((totalAmount * partialPercentage) / 100);
+    }
+    
+    paymentTypeForHistory = "partial";
+  } else if (paymentType === "remaining") {
+    // Calculate remaining payment amount
+    if (booking.paymentStatus !== "partial") {
+      throw new ApiError("No partial payment found. Cannot process remaining payment.", 400);
+    }
+    
+    // For COMBINED bookings, calculate actual remaining from payment history
+    if (booking.paymentGroupId) {
+      // Get all bookings in this payment group
+      const allBookings = await Booking.find({
+        paymentGroupId: booking.paymentGroupId,
+      }).select("priceDetails paymentDetails");
+
+      // Calculate combined total
+      const combinedTotal = allBookings.reduce(
+        (sum, b) => sum + (b.priceDetails?.totalAmount || 0),
+        0
+      );
+
+      // Calculate actual paid amount from payment history
+      let actualPaid = 0;
+      const paymentHistory = booking.paymentDetails?.paymentHistory || [];
+      for (const payment of paymentHistory) {
+        if (payment.status === "completed") {
+          actualPaid += payment.amount || 0;
+        }
+      }
+
+      // Remaining is combined total minus actual paid
+      paymentAmount = Math.round(combinedTotal - actualPaid);
+    } else {
+      // Single booking - use database value
+      paymentAmount = booking.paymentDetails?.remainingAmount || 0;
+    }
+    
+    paymentTypeForHistory = "remaining";
+    
+    if (paymentAmount <= 0) {
+      throw new ApiError("No remaining amount to pay", 400);
+    }
+  } else {
+    // Full payment
+    // For COMBINED bookings, use combined total
+    if (booking.paymentGroupId) {
+      const allBookings = await Booking.find({
+        paymentGroupId: booking.paymentGroupId,
+      }).select("priceDetails");
+
+      paymentAmount = allBookings.reduce(
+        (sum, b) => sum + (b.priceDetails?.totalAmount || 0),
+        0
+      );
+    } else {
+      // Single booking
+      paymentAmount = booking.paymentDetails?.totalAmount || booking.priceDetails.totalAmount;
+    }
+    
+    paymentTypeForHistory = "full";
+  }
+
   // Create Razorpay order
+  // Receipt format: type_last8chars_timestamp (max 40 chars for Razorpay)
+  const paymentTypeCode = paymentType === "partial" ? "P" : paymentType === "remaining" ? "R" : "F";
+  const bookingIdShort = booking._id.toString().slice(-8); // Last 8 chars of booking ID
+  const timestampShort = Date.now().toString().slice(-10); // Last 10 digits of timestamp
+  
   const options = {
-    amount: Math.round(booking.priceDetails.totalAmount * 100), // amount in smallest currency unit (paise) - must be integer
+    amount: Math.round(paymentAmount * 100), // amount in smallest currency unit (paise) - must be integer
     currency: "INR",
-    receipt: `booking_${booking._id}`,
+    receipt: `${paymentTypeCode}_${bookingIdShort}_${timestampShort}`, // Max 20 chars
     payment_capture: 1, // auto capture
   };
 
   console.log("payments about to end");
 
   const order = await razorpay.orders.create(options);
+
+  // Store payment intent in booking for verification later
+  if (!booking.paymentDetails) {
+    booking.paymentDetails = {
+      totalAmount: booking.priceDetails.totalAmount,
+      paidAmount: 0,
+      remainingAmount: booking.priceDetails.totalAmount,
+      partialPaymentPercentage: 25,
+      paymentHistory: []
+    };
+  }
+
+  // Add pending payment to history
+  booking.paymentDetails.paymentHistory.push({
+    paymentId: order.id,
+    amount: paymentAmount,
+    paymentType: paymentTypeForHistory,
+    razorpayOrderId: order.id,
+    status: "pending",
+    createdAt: new Date()
+  });
+
+  await booking.save();
 
   res.status(200).json({
     success: true,
@@ -131,6 +253,8 @@ export const createBookingPayment = asyncHandler(async (req, res) => {
       currency: order.currency,
       receipt: order.receipt,
       bookingId: booking._id,
+      paymentType: paymentTypeForHistory,
+      paymentAmount: paymentAmount,
     },
   });
 });
@@ -167,10 +291,14 @@ export const createExtendBookingPayment = asyncHandler(async (req, res) => {
   }
 
   // 6. Create a Razorpay order for exactly that extra amount
+  // Receipt format: EXT_last8chars_timestamp (max 40 chars for Razorpay)
+  const bookingIdShort = booking._id.toString().slice(-8);
+  const timestampShort = Date.now().toString().slice(-10);
+  
   const razorpayOptions = {
     amount: Math.round(additionalAmount * 100), // in paise (₹ → paise) - must be integer
     currency: "INR",
-    receipt: `extension_${booking._id}_${Date.now()}`, // e.g. extension_60f0b0a1d48abc1234567890_1627672800000
+    receipt: `EXT_${bookingIdShort}_${timestampShort}`, // Max 23 chars
     payment_capture: 1, // auto capture
   };
 
@@ -267,10 +395,13 @@ export const createOrderPayment = asyncHandler(async (req, res) => {
   }
 
   // Create Razorpay order
+  // Receipt format: ORD_last12chars (max 40 chars for Razorpay)
+  const orderIdShort = order._id.toString().slice(-12);
+  
   const options = {
     amount: Math.round(order.priceDetails.totalAmount * 100), // amount in smallest currency unit (paise) - must be integer
     currency: "INR",
-    receipt: `order_${order._id}`,
+    receipt: `ORD_${orderIdShort}`, // Max 16 chars
     payment_capture: 1, // auto capture
   };
 
@@ -288,7 +419,7 @@ export const createOrderPayment = asyncHandler(async (req, res) => {
   });
 });
 
-// @desc    Verify payment for booking
+// @desc    Verify payment for booking (supports partial and full payment)
 // @route   POST /api/payments/booking/:id/verify
 // @access  Private
 export const verifyBookingPayment = asyncHandler(async (req, res) => {
@@ -306,246 +437,200 @@ export const verifyBookingPayment = asyncHandler(async (req, res) => {
     throw new ApiError("Invalid payment signature", 400);
   }
 
-  // Get booking with bike details populated
+  // Get booking with details populated
   const booking = await Booking.findById(req.params.id)
     .populate("user")
     .populate("bike")
-    .populate("bikeItems.bike"); // This will populate bike details for multiple bikes
+    .populate("hostel")
+    .populate("bikeItems.bike");
 
   if (!booking) throw new ApiError("Booking not found", 404);
 
-  // Update booking payment status
-  booking.paymentStatus = "completed";
-  booking.paymentId = razorpay_payment_id;
-  booking.bookingStatus = "confirmed";
-  await booking.save();
+  // Find the payment in history
+  const paymentHistoryItem = booking.paymentDetails?.paymentHistory?.find(
+    (payment) => payment.razorpayOrderId === razorpay_order_id
+  );
 
-  // Prepare variables for template
-  const user = booking.user;
-  const price = booking.priceDetails || {};
-  const bikeDetails = booking.bikeDetails || {};
-  const bikeInfo = booking.bike || {}; // This is the populated bike document
+  if (!paymentHistoryItem) {
+    throw new ApiError("Payment record not found", 404);
+  }
 
-  const __filename = fileURLToPath(import.meta.url);
-  const __dirname = path.dirname(__filename);
+  // Update payment history item
+  paymentHistoryItem.razorpayPaymentId = razorpay_payment_id;
+  paymentHistoryItem.status = "completed";
+  paymentHistoryItem.paidAt = new Date();
 
-  // Calculate total days
-  const totalDays = calculateDays(booking.startDate, booking.endDate);
+  // Track the paid amount for response
+  let paidAmount = paymentHistoryItem.amount;
 
-  // Process bike data for template
-  let bikeDetailsHtml = "";
-  let totalBikes = 1;
-  let bikeTypes = 1;
+  // For COMBINED bookings with remaining payment, update ALL bookings in the group
+  if (booking.paymentGroupId && paymentHistoryItem.paymentType === "remaining") {
+    // Get all bookings in the payment group
+    const allBookings = await Booking.find({
+      paymentGroupId: booking.paymentGroupId,
+    });
 
-  if (booking.bikeItems && booking.bikeItems.length > 0) {
-    // Multiple bikes
-    totalBikes = booking.bikeItems.reduce(
-      (sum, item) => sum + item.quantity,
+    const totalGroupAmount = allBookings.reduce(
+      (sum, b) => sum + (b.priceDetails?.totalAmount || 0),
       0
     );
-    bikeTypes = booking.bikeItems.length;
 
-    bikeDetailsHtml = booking.bikeItems
-      .map((item) => {
-        const bike = item.bike || {};
-        const kmType =
-          item.kmOption === "unlimited"
-            ? "Unlimited KM"
-            : `Limited KM (${item.kmLimit || 60} km/day)`;
+    // Update each booking proportionally
+    for (const b of allBookings) {
+      const proportion = b.priceDetails.totalAmount / totalGroupAmount;
+      const proportionalPayment = Math.round(paymentHistoryItem.amount * proportion);
 
-        return `
-        <div class="bike-card" style="margin-bottom: 16px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; text-align: center;">
-          <div class="bike-title" style="font-size: 20px; font-weight: 600; margin-bottom: 8px;">${
-            bike.title || "Bike"
-          }</div>
-          <div class="bike-details" style="font-size: 16px; color: #64748b;">
-            ${bike.brand || ""} ${bike.model || ""} ${
-          bike.year ? `| ${bike.year}` : ""
-        }
-          </div>
-          <div style="margin-top: 8px;">
-            <span style="background: #f47b20; color: white; padding: 4px 8px; border-radius: 4px; font-size: 12px; margin-right: 8px;">
-              ${item.quantity} Bike${item.quantity > 1 ? "s" : ""}
-            </span>
-            <span style="background: #e2e8f0; color: #64748b; padding: 4px 8px; border-radius: 4px; font-size: 12px;">
-              ${kmType}
-            </span>
-          </div>
-          ${
-            bike.registrationNumber
-              ? `<div style="margin-top: 8px; font-size: 14px; color: #64748b;">Registration: ${bike.registrationNumber}</div>`
-              : ""
-          }
-        </div>
-      `;
-      })
-      .join("");
+      // Find or add payment history item for this booking
+      const existingPayment = b.paymentDetails.paymentHistory.find(
+        (p) => p.razorpayOrderId === razorpay_order_id
+      );
 
-    bikeDetailsHtml += `
-      <div style="text-align: center; margin-top: 16px; padding: 12px; background: #f8fafc; border-radius: 8px; font-weight: 600; border: 2px solid #f47b20;">
-        Total: ${totalBikes} Bike${
-      totalBikes > 1 ? "s" : ""
-    } | ${bikeTypes} Type${bikeTypes > 1 ? "s" : ""}
-      </div>
-    `;
-  } else {
-    // Single bike
-    const packageType = bikeDetails.isUnlimited
-      ? "Unlimited KM Package"
-      : `Limited KM Package (${bikeDetails.kmLimit || 60} km/day)`;
-    bikeDetailsHtml = `
-      <div class="bike-card" style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; text-align: center;">
-        <div class="bike-title" style="font-size: 20px; font-weight: 600; margin-bottom: 8px;">${
-          bikeInfo.title || "Bike"
-        }</div>
-        <div class="bike-details" style="font-size: 16px; color: #64748b;">
-          ${bikeInfo.brand || ""} ${bikeInfo.model || ""} ${
-      bikeInfo.year ? `| ${bikeInfo.year}` : ""
+      if (existingPayment) {
+        existingPayment.razorpayPaymentId = razorpay_payment_id;
+        existingPayment.status = "completed";
+        existingPayment.paidAt = new Date();
+        existingPayment.amount = proportionalPayment;
+      } else {
+        b.paymentDetails.paymentHistory.push({
+          paymentId: razorpay_payment_id,
+          razorpayOrderId: razorpay_order_id,
+          razorpayPaymentId: razorpay_payment_id,
+          amount: proportionalPayment,
+          paymentType: "remaining",
+          status: "completed",
+          paidAt: new Date(),
+          createdAt: new Date(),
+        });
+      }
+
+      // Update payment details
+      b.paymentDetails.paidAmount += proportionalPayment;
+      b.paymentDetails.remainingAmount = Math.max(
+        0,
+        b.paymentDetails.totalAmount - b.paymentDetails.paidAmount
+      );
+      b.paymentStatus = "completed";
+      b.bookingStatus = "confirmed";
+
+      await b.save();
     }
-        </div>
-        <div style="margin-top: 8px;">
-          <span style="background: #e2e8f0; color: #64748b; padding: 4px 8px; border-radius: 4px; font-size: 12px;">
-            ${packageType}
-          </span>
-        </div>
-        ${
-          bikeInfo.registrationNumber
-            ? `<div style="margin-top: 8px; font-size: 14px; color: #64748b;">Registration: ${bikeInfo.registrationNumber}</div>`
-            : ""
-        }
-      </div>
+  } else {
+    // Single booking or partial payment - update only this booking
+    booking.paymentDetails.paidAmount += paidAmount;
+    booking.paymentDetails.remainingAmount = Math.max(
+      0,
+      booking.paymentDetails.totalAmount - booking.paymentDetails.paidAmount
+    );
+
+    // Determine payment status
+    if (paymentHistoryItem.paymentType === "partial") {
+      booking.paymentStatus = "partial";
+      booking.bookingStatus = "confirmed"; // Confirm booking on partial payment
+    } else if (
+      paymentHistoryItem.paymentType === "remaining" ||
+      paymentHistoryItem.paymentType === "full"
+    ) {
+      booking.paymentStatus = "completed";
+      booking.bookingStatus = "confirmed";
+    }
+  }
+
+  // Set primary payment ID for backward compatibility
+  if (!booking.paymentId) {
+    booking.paymentId = razorpay_payment_id;
+  }
+
+  await booking.save();
+
+  // Prepare email content using dynamic template
+  const user = booking.user;
+  const isPartialPayment = paymentHistoryItem.paymentType === "partial";
+  const isRemainingPayment = paymentHistoryItem.paymentType === "remaining";
+  
+  let emailSubject;
+  let emailContent;
+  
+  // Only send full booking confirmation email for first payment (partial or full)
+  if (isPartialPayment || paymentHistoryItem.paymentType === "full") {
+    emailSubject = isPartialPayment 
+      ? "🎉 Booking Confirmed with Partial Payment - Happy Go"
+      : "🎉 Booking Confirmed - Full Payment - Happy Go";
+
+    // Generate rich HTML email using template
+    try {
+      emailContent = generateBookingConfirmationEmail({
+        bookingType: booking.bookingType,
+        booking: booking,
+        user: user,
+        bikeDetails: booking.bike || (booking.bikeItems && booking.bikeItems[0]?.bike),
+        hostelDetails: booking.hostel,
+        priceDetails: {
+          basePrice: booking.priceDetails?.basePrice,
+          subtotal: booking.priceDetails?.subtotal,
+          helmetCharges: booking.priceDetails?.helmetCharges,
+          taxes: booking.priceDetails?.taxes,
+          gst: booking.priceDetails?.gst,
+          gstPercentage: booking.priceDetails?.gstPercentage || 5,
+          discount: booking.priceDetails?.discount || 0,
+          totalAmount: booking.priceDetails?.totalAmount,
+        },
+      });
+    } catch (templateError) {
+      console.error("❌ Template generation failed, using fallback:", templateError);
+      // Fallback to simple email
+      emailContent = `
+        <h1>Booking Confirmed${isPartialPayment ? " - Partial Payment Received" : ""}</h1>
+        <p>Dear ${user.name},</p>
+        <p>Your ${booking.bookingType} booking has been confirmed!</p>
+        <p>Booking ID: ${booking._id}</p>
+        <p>Amount Paid: ₹${paidAmount}</p>
+        ${isPartialPayment ? `<p>Remaining Amount: ₹${booking.paymentDetails.remainingAmount}</p>` : ""}
+        <p>Thank you for choosing HappyGo!</p>
+      `;
+    }
+  } else if (isRemainingPayment) {
+    // Simple email for remaining payment
+    emailSubject = "✅ Full Payment Completed - Happy Go";
+    emailContent = `
+      <h1>Payment Completed Successfully</h1>
+      <p>Dear ${user.name},</p>
+      <p>Your remaining payment has been processed successfully!</p>
+      <p>Booking ID: ${booking._id}</p>
+      <p>Remaining Amount Paid: ₹${paidAmount}</p>
+      <p>Total Paid: ₹${booking.paymentDetails.paidAmount}</p>
+      <p>Your booking is now fully paid and confirmed.</p>
+      <p>Thank you for choosing HappyGo!</p>
     `;
   }
 
-  const variables = {
-    // Customer Information
-    customerName: user.name || "",
-    customerEmail: user.email || "",
-    customerMobile: user.mobile || "",
-
-    // Booking Information
-    bookingId: booking._id.toString(),
-    paymentId: razorpay_payment_id,
-    paymentDate: new Date().toLocaleDateString("en-IN", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    }),
-
-    // Bike Information - processed HTML
-    bikeDetailsHtml: bikeDetailsHtml,
-    totalBikes: totalBikes.toString(),
-    bikeTypes: bikeTypes.toString(),
-
-    // Single Bike Information (fallback for legacy bookings)
-    bikeTitle: bikeInfo.title || bikeInfo.name || "Bike",
-    bikeBrand: bikeInfo.brand || "",
-    bikeModel: bikeInfo.model || "",
-    bikeYear: bikeInfo.year || "",
-    bikeRegistration: bikeInfo.registrationNumber || bikeInfo.regNumber || "",
-
-    // Rental Period
-    pickupDate: formatDate(booking.startDate),
-    pickupTime: formatTime(booking.startTime),
-    dropoffDate: formatDate(booking.endDate),
-    dropoffTime: formatTime(booking.endTime),
-    totalDays: totalDays.toString(),
-
-    // Price Details (mapping to your actual structure)
-    baseAmount: price.basePrice || "0",
-    taxAmount: price.taxes || "0",
-    gstAmount: price.taxes || "0", // Using taxes as GST
-    discountAmount: price.discount || "",
-    additionalCharges: bikeDetails.additionalCharges?.amount || "",
-    helmetCharges: price.helmetCharges || "0",
-    securityDeposit: "", // Not in your structure, keeping empty
-    totalAmount: price.totalAmount || "0",
-
-    // Conditional pricing rows HTML
-    helmetChargesRow:
-      price.helmetCharges && price.helmetCharges !== "0"
-        ? `
-      <tr class="row">
-        <td class="label">Helmet Rental</td>
-        <td class="value">₹${price.helmetCharges}</td>
-      </tr>
-    `
-        : "",
-    discountRow:
-      price.discount && price.discount !== "0"
-        ? `
-      <tr class="row">
-        <td class="label">Discount Applied</td>
-        <td class="value" style="color: #16a34a">-₹${price.discount}</td>
-      </tr>
-    `
-        : "",
-    securityDepositRow: "", // Always empty for now
-
-    // Package Information (for single bike)
-    packageType: bikeDetails.isUnlimited
-      ? "Unlimited KM"
-      : `Limited KM (${bikeDetails.kmLimit || 60} km/day)`,
-
-    // URLs
-    bookingUrl: `${
-      process.env.FRONTEND_URL || "https://happygobikes.netlify.app"
-    }/booking/confirmed/${booking._id}`,
-    websiteUrl: process.env.FRONTEND_URL || "https://happygobikes.netlify.app",
-    bookingsUrl: `${
-      process.env.FRONTEND_URL || "https://happygobikes.netlify.app"
-    }/bookings`,
-    supportUrl: `${
-      process.env.FRONTEND_URL || "https://happygobikes.netlify.app"
-    }/support`,
-    termsUrl: `${
-      process.env.FRONTEND_URL || "https://happygobikes.netlify.app"
-    }/terms`,
-    privacyUrl: `${
-      process.env.FRONTEND_URL || "https://happygobikes.netlify.app"
-    }/privacy`,
-    trackingUrl: `${
-      process.env.FRONTEND_URL || "https://happygobikes.netlify.app"
-    }/bookings`,
-  };
-
-  console.log("🚀 ~ Email Variables:", variables);
-
   try {
-    // Path to booking confirmation template
-    const bookingTemplatePath = path.join(
-      __dirname,
-      "../templates/booking-confirmation-email.html"
-    );
-
-    // Check if template file exists
-    if (!fs.existsSync(bookingTemplatePath)) {
-      console.error("Booking template not found at:", bookingTemplatePath);
-      throw new ApiError("Booking email template not found", 500);
-    }
-
-    // Fill template
-    const bookingEmailHtml = fillTemplate(bookingTemplatePath, variables);
-
-    // Send Booking Confirmation Email only
+    // Send confirmation email
     await sendEmail({
       email: user.email,
-      subject: "🎉 Booking Confirmed - Happy Go Bike Rentals",
-      message: bookingEmailHtml,
+      subject: emailSubject,
+      message: emailContent,
       isHtml: true,
     });
 
-    console.log("✅ Booking confirmation email sent to:", user.email);
+    console.log("✅ Payment confirmation email sent to:", user.email);
   } catch (emailError) {
     console.error("❌ Email sending failed:", emailError);
     // Don't throw error here, payment is already processed
-    // Just log the error and continue
   }
 
   res.status(200).json({
     success: true,
-    message: "Payment verified and booking confirmation email sent",
-    data: booking,
+    message: `${paymentHistoryItem.paymentType.charAt(0).toUpperCase() + paymentHistoryItem.paymentType.slice(1)} payment verified successfully`,
+    data: {
+      booking: booking,
+      paymentDetails: {
+        paymentType: paymentHistoryItem.paymentType,
+        paidAmount: paidAmount,
+        totalPaid: booking.paymentDetails.paidAmount,
+        remainingAmount: booking.paymentDetails.remainingAmount,
+        paymentStatus: booking.paymentStatus
+      }
+    },
   });
 });
 
@@ -611,5 +696,271 @@ export const verifyOrderPayment = asyncHandler(async (req, res) => {
     success: true,
     message: "Payment verified successfully",
     data: order,
+  });
+});
+
+// @desc    Verify cart payment (for combined bike + hostel bookings)
+// @route   POST /api/payments/cart/verify
+// @access  Private
+export const verifyCartPayment = asyncHandler(async (req, res) => {
+  const {
+    paymentGroupId,
+    razorpay_order_id,
+    razorpay_payment_id,
+    razorpay_signature,
+  } = req.body;
+
+  // Validate required fields
+  if (!paymentGroupId || !razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+    throw new ApiError("Missing required payment verification fields", 400);
+  }
+
+  // Verify signature
+  const body = razorpay_order_id + "|" + razorpay_payment_id;
+  const expectedSignature = crypto
+    .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+    .update(body.toString())
+    .digest("hex");
+
+  if (expectedSignature !== razorpay_signature) {
+    throw new ApiError("Invalid payment signature", 400);
+  }
+
+  // Find all bookings in this payment group
+  const bookings = await Booking.find({ paymentGroupId })
+    .populate("user")
+    .populate("bike")
+    .populate("hostel")
+    .populate("bikeItems.bike");
+
+  console.log(`📦 Found ${bookings.length} bookings for payment group: ${paymentGroupId}`);
+  bookings.forEach((b, i) => {
+    console.log(`   ${i + 1}. ${b.bookingType} booking (${b._id})`);
+    console.log(`      Payment history entries: ${b.paymentDetails?.paymentHistory?.length || 0}`);
+    b.paymentDetails?.paymentHistory?.forEach((p, j) => {
+      console.log(`         ${j + 1}. Order: ${p.razorpayOrderId}, Amount: ${p.amount}, Status: ${p.status}`);
+    });
+  });
+
+  if (bookings.length === 0) {
+    throw new ApiError("No bookings found for this payment group", 404);
+  }
+
+  // Calculate total amount across all bookings
+  const totalBookingAmount = bookings.reduce(
+    (sum, b) => sum + (b.paymentDetails?.totalAmount || 0),
+    0
+  );
+
+  // Update all bookings
+  const updatedBookings = [];
+  let totalPaidForGroup = 0;
+  let hasBikes = false;
+  let hasHostel = false;
+
+  for (const booking of bookings) {
+    // Find the payment history item
+    const paymentItem = booking.paymentDetails?.paymentHistory?.find(
+      (p) => p.razorpayOrderId === razorpay_order_id
+    );
+
+    if (!paymentItem) {
+      console.error(`Payment history not found for booking ${booking._id}`);
+      continue;
+    }
+
+    // Calculate proportional payment for this booking
+    // If bike is ₹840 and hostel is ₹824, and total paid is ₹416:
+    // Bike gets: (840/1664) × 416 = ₹210
+    // Hostel gets: (824/1664) × 416 = ₹206
+    const bookingProportion = booking.paymentDetails.totalAmount / totalBookingAmount;
+    const proportionalPayment = Math.round(paymentItem.amount * bookingProportion);
+
+    // Update payment history item with proportional amount
+    paymentItem.razorpayPaymentId = razorpay_payment_id;
+    paymentItem.status = "completed";
+    paymentItem.paidAt = new Date();
+    paymentItem.paymentId = razorpay_payment_id;
+    paymentItem.amount = proportionalPayment; // Update with proportional amount
+
+    // Update booking payment details with proportional amount
+    booking.paymentDetails.paidAmount += proportionalPayment;
+    booking.paymentDetails.remainingAmount = Math.max(
+      0,
+      booking.paymentDetails.totalAmount - booking.paymentDetails.paidAmount
+    );
+
+    // Determine payment status
+    if (paymentItem.paymentType === "partial") {
+      booking.paymentStatus = "partial";
+      booking.bookingStatus = "confirmed";
+    } else if (paymentItem.paymentType === "full") {
+      booking.paymentStatus = "completed";
+      booking.bookingStatus = "confirmed";
+    }
+
+    // Set primary payment ID for backward compatibility
+    if (!booking.paymentId) {
+      booking.paymentId = razorpay_payment_id;
+    }
+
+    await booking.save();
+
+    updatedBookings.push({
+      bookingId: booking._id,
+      type: booking.bookingType,
+      paymentStatus: booking.paymentStatus,
+      bookingStatus: booking.bookingStatus,
+      paidAmount: proportionalPayment,
+      remainingAmount: booking.paymentDetails.remainingAmount,
+    });
+
+    totalPaidForGroup += proportionalPayment;
+    if (booking.bookingType === "bike") hasBikes = true;
+    if (booking.bookingType === "hostel") hasHostel = true;
+  }
+
+  // Send confirmation email
+  try {
+    const user = bookings[0].user;
+    const isPartialPayment = bookings[0].paymentDetails.paidAmount < bookings[0].paymentDetails.totalAmount;
+
+    let emailSubject;
+    let emailContent;
+
+    // Determine booking type for email
+    let bookingTypeForEmail = "bike";
+    if (hasBikes && hasHostel) {
+      bookingTypeForEmail = "combined";
+    } else if (hasHostel) {
+      bookingTypeForEmail = "hostel";
+    }
+
+    // For combined bookings, use the template
+    if (hasBikes && hasHostel) {
+      emailSubject = isPartialPayment
+        ? "🎉 Combined Booking Confirmed - Partial Payment - Happy Go"
+        : "🎉 Combined Booking Confirmed - Full Payment - Happy Go";
+
+      try {
+        // Create a combined booking object for email template
+        const bikeBooking = bookings.find((b) => b.bookingType === "bike");
+        const hostelBooking = bookings.find((b) => b.bookingType === "hostel");
+
+        const combinedBooking = {
+          ...bikeBooking.toObject(),
+          _id: paymentGroupId,
+          hostel: hostelBooking?.hostel,
+          roomType: hostelBooking?.roomType,
+          mealOption: hostelBooking?.mealOption,
+          numberOfBeds: hostelBooking?.numberOfBeds,
+          numberOfNights: hostelBooking?.numberOfNights,
+          hostelDetails: hostelBooking?.hostelDetails,
+          checkIn: hostelBooking?.checkIn,
+          checkOut: hostelBooking?.checkOut,
+          partialPaymentPercentage: bikeBooking.paymentDetails.partialPaymentPercentage,
+          paymentDetails: {
+            ...bikeBooking.paymentDetails,
+            totalAmount: bookings.reduce((sum, b) => sum + b.paymentDetails.totalAmount, 0),
+            paidAmount: totalPaid,
+            remainingAmount: bookings.reduce((sum, b) => sum + b.paymentDetails.remainingAmount, 0),
+          },
+        };
+
+        emailContent = generateBookingConfirmationEmail({
+          bookingType: "combined",
+          booking: combinedBooking,
+          user: user,
+          bikeDetails: bikeBooking?.bike || (bikeBooking?.bikeItems && bikeBooking.bikeItems[0]?.bike),
+          hostelDetails: hostelBooking?.hostel,
+          priceDetails: {
+            basePrice: bookings.reduce((sum, b) => sum + (b.priceDetails?.basePrice || b.priceDetails?.subtotal || 0), 0),
+            subtotal: bookings.reduce((sum, b) => sum + (b.priceDetails?.subtotal || 0), 0),
+            helmetCharges: bikeBooking?.priceDetails?.helmetCharges || 0,
+            taxes: bookings.reduce((sum, b) => sum + (b.priceDetails?.taxes || b.priceDetails?.gst || 0), 0),
+            gst: bookings.reduce((sum, b) => sum + (b.priceDetails?.gst || 0), 0),
+            gstPercentage: 5,
+            discount: 0,
+            totalAmount: bookings.reduce((sum, b) => sum + b.priceDetails.totalAmount, 0),
+          },
+        });
+      } catch (templateError) {
+        console.error("❌ Template generation failed, using fallback:", templateError);
+        // Fallback email
+        emailContent = `
+          <h1>Combined Booking Confirmed${isPartialPayment ? " - Partial Payment" : ""}</h1>
+          <p>Dear ${user.name},</p>
+          <p>Your combined booking (bike + hostel) has been confirmed!</p>
+          <p>Payment Group ID: ${paymentGroupId}</p>
+          <p>Bookings:</p>
+          <ul>
+            ${updatedBookings.map(b => `<li>${b.type.toUpperCase()}: ${b.bookingId}</li>`).join('')}
+          </ul>
+          <p>Amount Paid: ₹${totalPaid}</p>
+          ${isPartialPayment ? `<p>Remaining Amount: ₹${updatedBookings[0].remainingAmount}</p>` : ""}
+          <p>Thank you for choosing HappyGo!</p>
+        `;
+      }
+    } else {
+      // Single booking type (bike or hostel only)
+      emailSubject = isPartialPayment
+        ? `🎉 ${hasBikes ? "Bike" : "Hostel"} Booking Confirmed - Partial Payment - Happy Go`
+        : `🎉 ${hasBikes ? "Bike" : "Hostel"} Booking Confirmed - Full Payment - Happy Go`;
+
+      try {
+        emailContent = generateBookingConfirmationEmail({
+          bookingType: hasBikes ? "bike" : "hostel",
+          booking: bookings[0],
+          user: user,
+          bikeDetails: bookings[0].bike || (bookings[0].bikeItems && bookings[0].bikeItems[0]?.bike),
+          hostelDetails: bookings[0].hostel,
+          priceDetails: {
+            basePrice: bookings[0].priceDetails?.basePrice || bookings[0].priceDetails?.subtotal,
+            subtotal: bookings[0].priceDetails?.subtotal,
+            helmetCharges: bookings[0].priceDetails?.helmetCharges || 0,
+            taxes: bookings[0].priceDetails?.taxes || bookings[0].priceDetails?.gst,
+            gst: bookings[0].priceDetails?.gst,
+            gstPercentage: 5,
+            discount: 0,
+            totalAmount: bookings[0].priceDetails.totalAmount,
+          },
+        });
+      } catch (templateError) {
+        console.error("❌ Template generation failed, using fallback:", templateError);
+        emailContent = `
+          <h1>${hasBikes ? "Bike" : "Hostel"} Booking Confirmed</h1>
+          <p>Dear ${user.name},</p>
+          <p>Your booking has been confirmed!</p>
+          <p>Booking ID: ${bookings[0]._id}</p>
+          <p>Amount Paid: ₹${totalPaid}</p>
+          ${isPartialPayment ? `<p>Remaining Amount: ₹${bookings[0].paymentDetails.remainingAmount}</p>` : ""}
+          <p>Thank you for choosing HappyGo!</p>
+        `;
+      }
+    }
+
+    await sendEmail({
+      email: user.email,
+      subject: emailSubject,
+      message: emailContent,
+      isHtml: true,
+    });
+
+    console.log("✅ Payment confirmation email sent to:", user.email);
+  } catch (emailError) {
+    console.error("❌ Email sending failed:", emailError);
+    // Don't throw error, payment is already processed
+  }
+
+  res.status(200).json({
+    success: true,
+    data: {
+      paymentGroupId,
+      bookings: updatedBookings,
+      totalPaid: totalPaidForGroup,
+      remainingAmount: updatedBookings[0]?.remainingAmount || 0,
+      allConfirmed: updatedBookings.every((b) => b.bookingStatus === "confirmed"),
+    },
+    message: `Payment verified successfully! ${updatedBookings.length} booking(s) confirmed.`,
   });
 });

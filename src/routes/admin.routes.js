@@ -11,6 +11,7 @@ import {
   getAdminBookings,
   getAdminOrders,
   getAdminReferrals,
+  markPaymentCompleted,
 } from "../controllers/admin.controller.js"
 import { adminProtect } from "../middleware/auth.middleware.js"
 
@@ -23,6 +24,7 @@ router.get("/employees/:id", adminProtect, getEmployee)
 router.put("/employees/:id", adminProtect, updateEmployee)
 router.delete("/employees/:id", adminProtect, deleteEmployee)
 router.put("/bookings/:id/assign", adminProtect, assignBookingToEmployee)
+router.put("/bookings/:id/complete-payment", adminProtect, markPaymentCompleted)
 router.put("/orders/:id/assign", adminProtect, assignOrderToEmployee)
 router.get("/bookings", adminProtect, getAdminBookings)
 router.get("/orders", adminProtect, getAdminOrders)

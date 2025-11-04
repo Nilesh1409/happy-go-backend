@@ -1,6 +1,7 @@
 import mongoose from "mongoose"
 
-const cartItemSchema = new mongoose.Schema({
+// Bike cart item schema
+const bikeCartItemSchema = new mongoose.Schema({
   bike: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Bike",
@@ -29,7 +30,51 @@ const cartItemSchema = new mongoose.Schema({
     type: Date,
     default: Date.now,
   },
-})
+});
+
+// Hostel cart item schema
+const hostelCartItemSchema = new mongoose.Schema({
+  hostel: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Hostel",
+    required: true,
+  },
+  roomType: {
+    type: String,
+    required: true,
+  },
+  mealOption: {
+    type: String,
+    enum: ["bedOnly", "bedAndBreakfast", "bedBreakfastAndDinner"],
+    required: true,
+  },
+  quantity: {
+    type: Number,
+    required: true,
+    min: 1,
+    default: 1,
+  },
+  pricePerNight: {
+    type: Number,
+    required: true,
+  },
+  numberOfNights: {
+    type: Number,
+    required: true,
+  },
+  totalPrice: {
+    type: Number,
+    required: true,
+  },
+  isWorkstation: {
+    type: Boolean,
+    default: false,
+  },
+  addedAt: {
+    type: Date,
+    default: Date.now,
+  },
+});
 
 const cartSchema = new mongoose.Schema(
   {
@@ -38,24 +83,31 @@ const cartSchema = new mongoose.Schema(
       ref: "User",
       required: true,
     },
-    items: [cartItemSchema],
-    startDate: {
-      type: Date,
-      required: true,
+    // Bike items
+    bikeItems: [bikeCartItemSchema],
+    // Hostel items
+    hostelItems: [hostelCartItemSchema],
+    // Bike booking dates
+    bikeDates: {
+      startDate: Date,
+      endDate: Date,
+      startTime: String,
+      endTime: String,
     },
-    endDate: {
-      type: Date,
-      required: true,
-    },
-    startTime: {
-      type: String,
-      required: true,
-    },
-    endTime: {
-      type: String,
-      required: true,
+    // Hostel booking dates
+    hostelDates: {
+      checkIn: Date,
+      checkOut: Date,
     },
     pricing: {
+      bikeSubtotal: {
+        type: Number,
+        default: 0,
+      },
+      hostelSubtotal: {
+        type: Number,
+        default: 0,
+      },
       subtotal: {
         type: Number,
         default: 0,
