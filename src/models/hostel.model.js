@@ -1,22 +1,11 @@
-import mongoose from "mongoose"
+import mongoose from "mongoose";
 
 const roomSchema = new mongoose.Schema(
   {
     type: {
       type: String,
       required: [true, "Please add a room type"],
-      enum: [
-        "Single Bed",
-        "Double Bed",
-        "Mixed A/C Dormitory",
-        "Deluxe Double A/C Room with Ensuite Bathroom",
-        "Bed in 6 Bed Mixed A/C Dormitory Room with Ensuite Bathroom",
-        "Bed in 4 Bed Mixed A/C Dormitory Room with Ensuite Bathroom",
-        "Deluxe Private A/C Room with Ensuite Bathroom",
-        "Private Room",
-        "Shared Dormitory",
-        "Workstation Bed",
-      ],
+      trim: true,
     },
     description: {
       type: String,
@@ -33,11 +22,12 @@ const roomSchema = new mongoose.Schema(
       required: [true, "Please add capacity"],
       min: [1, "Capacity must be at least 1"],
     },
-    priceOptions: {
+    // Meal options pricing
+    mealOptions: {
       bedOnly: {
         basePrice: {
           type: Number,
-          required: [true, "Please add a base price"],
+          required: [true, "Please add bed only base price"],
         },
         discountedPrice: {
           type: Number,
@@ -46,7 +36,7 @@ const roomSchema = new mongoose.Schema(
       bedAndBreakfast: {
         basePrice: {
           type: Number,
-          required: [true, "Please add a base price"],
+          required: [true, "Please add bed and breakfast base price"],
         },
         discountedPrice: {
           type: Number,
@@ -55,37 +45,43 @@ const roomSchema = new mongoose.Schema(
       bedBreakfastAndDinner: {
         basePrice: {
           type: Number,
-          required: [true, "Please add a base price"],
+          required: [true, "Please add full board base price"],
         },
         discountedPrice: {
           type: Number,
         },
       },
     },
-    amenities: [String],
-    totalRooms: {
+    amenities: [String], // Locker, Fan, Air conditioner, Ensuite Washroom, etc.
+    totalBeds: {
       type: Number,
-      required: [true, "Please add total number of rooms"],
-      min: [1, "Total rooms must be at least 1"],
+      required: [true, "Please add total number of beds"],
+      min: [1, "Total beds must be at least 1"],
     },
-    availableRooms: {
+    availableBeds: {
       type: Number,
-      required: [true, "Please add available rooms"],
-      min: [0, "Available rooms cannot be negative"],
+      required: [true, "Please add available beds"],
+      min: [0, "Available beds cannot be negative"],
     },
-    // Hostel specific features
+    // Workstation support
     isWorkstationFriendly: {
       type: Boolean,
       default: false,
     },
-    workstationAmenities: [String], // Wi-Fi, Power outlets, Desk space, etc.
+    workstationDetails: {
+      hasDesk: Boolean,
+      hasChair: Boolean,
+      hasPowerOutlets: Boolean,
+      hasGoodLighting: Boolean,
+      quietZone: Boolean,
+    },
   },
   {
     _id: true,
-  },
-)
+  }
+);
 
-const hotelSchema = new mongoose.Schema(
+const hostelSchema = new mongoose.Schema(
   {
     name: {
       type: String,
@@ -112,6 +108,7 @@ const hotelSchema = new mongoose.Schema(
         required: [true, "Please add at least one image"],
       },
     ],
+    // Hostel amenities
     amenities: [
       {
         name: {
@@ -127,15 +124,16 @@ const hotelSchema = new mongoose.Schema(
       },
     ],
     rooms: [roomSchema],
+    // Hostel policies and guidelines
     guidelines: [String],
     checkInGuidelines: [String],
     cancellationPolicies: [String],
-    propertyGuidelines: [String], // Additional guidelines for hostel stays
+    houseRules: [String],
     ratings: {
       type: Number,
       min: [1, "Rating must be at least 1"],
       max: [5, "Rating cannot be more than 5"],
-      default: 4,
+      default: 0,
     },
     numReviews: {
       type: Number,
@@ -144,12 +142,6 @@ const hotelSchema = new mongoose.Schema(
     isActive: {
       type: Boolean,
       default: true,
-    },
-    // Hostel specific fields
-    propertyType: {
-      type: String,
-      enum: ["hotel", "hostel"],
-      default: "hostel",
     },
     checkInTime: {
       type: String,
@@ -165,32 +157,32 @@ const hotelSchema = new mongoose.Schema(
       email: String,
       whatsapp: String,
     },
-    // Policies
-    policies: {
-      cancellation: [String],
-      checkIn: [String],
-      house: [String],
+    // Workstation availability
+    supportsWorkstation: {
+      type: Boolean,
+      default: false,
     },
+    workstationAmenities: [String], // High-speed WiFi, Dedicated workspace, Printing facility, etc.
   },
   {
     timestamps: true,
     toJSON: { virtuals: true },
     toObject: { virtuals: true },
-  },
-)
+  }
+);
 
-// Virtual for hotel's bookings
-hotelSchema.virtual("bookings", {
+// Virtual for hostel's bookings
+hostelSchema.virtual("bookings", {
   ref: "Booking",
   localField: "_id",
   foreignField: "hotel",
   justOne: false,
-})
+});
 
 // Create index for search
-hotelSchema.index({ name: "text", location: "text" })
+hostelSchema.index({ name: "text", location: "text" });
 
-const Hotel = mongoose.model("Hotel", hotelSchema)
+const Hostel = mongoose.model("Hostel", hostelSchema);
 
-export default Hotel
+export default Hostel;
 

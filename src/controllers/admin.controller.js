@@ -3,11 +3,12 @@ import Employee from "../models/employee.model.js";
 import Booking from "../models/booking.model.js";
 import Order from "../models/order.model.js";
 import Bike from "../models/bike.model.js";
-import Hotel from "../models/hotel.model.js";
+import Hostel from "../models/hostel.model.js";
 import Product from "../models/product.model.js";
 import Referral from "../models/referral.model.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
+import { sendEmail } from "../utils/sendEmail.js";
 import mongoose from "mongoose";
 
 // @desc    Get admin dashboard data
@@ -18,12 +19,12 @@ export const getDashboardData = asyncHandler(async (req, res) => {
   const totalUsers = await User.countDocuments({ role: "user" });
   const totalEmployees = await Employee.countDocuments();
   const totalBikes = await Bike.countDocuments();
-  const totalHotels = await Hotel.countDocuments();
+  const totalHostels = await Hostel.countDocuments();
   const totalProducts = await Product.countDocuments();
 
   // Get bookings
   const bikeBookings = await Booking.countDocuments({ bookingType: "bike" });
-  const hotelBookings = await Booking.countDocuments({ bookingType: "hotel" });
+  const hostelBookings = await Booking.countDocuments({ bookingType: "hostel" });
   const productOrders = await Order.countDocuments();
 
   // Get pending actions
@@ -32,8 +33,8 @@ export const getDashboardData = asyncHandler(async (req, res) => {
     bookingStatus: "pending",
     assignedEmployee: { $exists: false },
   });
-  const pendingHotelBookings = await Booking.countDocuments({
-    bookingType: "hotel",
+  const pendingHostelBookings = await Booking.countDocuments({
+    bookingType: "hostel",
     bookingStatus: "pending",
     assignedEmployee: { $exists: false },
   });
@@ -42,20 +43,53 @@ export const getDashboardData = asyncHandler(async (req, res) => {
     assignedEmployee: { $exists: false },
   });
 
-  // Get earnings
+  // Get earnings (including partial payments)
   const bikeEarnings = await Booking.aggregate([
-    { $match: { bookingType: "bike", paymentStatus: "completed" } },
-    { $group: { _id: null, total: { $sum: "$priceDetails.totalAmount" } } },
+    { 
+      $match: { 
+        bookingType: "bike", 
+        paymentStatus: { $in: ["partial", "completed"] } 
+      } 
+    },
+    { 
+      $group: { 
+        _id: null, 
+        total: { $sum: "$paymentDetails.paidAmount" } 
+      } 
+    },
   ]);
 
-  const hotelEarnings = await Booking.aggregate([
-    { $match: { bookingType: "hotel", paymentStatus: "completed" } },
-    { $group: { _id: null, total: { $sum: "$priceDetails.totalAmount" } } },
+  const hostelEarnings = await Booking.aggregate([
+    { 
+      $match: { 
+        bookingType: "hostel", 
+        paymentStatus: { $in: ["partial", "completed"] } 
+      } 
+    },
+    { 
+      $group: { 
+        _id: null, 
+        total: { $sum: "$paymentDetails.paidAmount" } 
+      } 
+    },
   ]);
 
   const productEarnings = await Order.aggregate([
     { $match: { paymentStatus: "completed" } },
     { $group: { _id: null, total: { $sum: "$priceDetails.totalAmount" } } },
+  ]);
+
+  // Get payment status breakdown for bookings
+  const paymentStatusBreakdown = await Booking.aggregate([
+    {
+      $group: {
+        _id: "$paymentStatus",
+        count: { $sum: 1 },
+        totalAmount: { $sum: "$priceDetails.totalAmount" },
+        paidAmount: { $sum: "$paymentDetails.paidAmount" },
+        remainingAmount: { $sum: "$paymentDetails.remainingAmount" },
+      }
+    }
   ]);
 
   // Get popular items
@@ -85,27 +119,27 @@ export const getDashboardData = asyncHandler(async (req, res) => {
     },
   ]);
 
-  const popularHotels = await Booking.aggregate([
-    { $match: { bookingType: "hotel" } },
-    { $group: { _id: "$hotel", count: { $sum: 1 } } },
+  const popularHostels = await Booking.aggregate([
+    { $match: { bookingType: "hostel" } },
+    { $group: { _id: "$hostel", count: { $sum: 1 } } },
     { $sort: { count: -1 } },
     { $limit: 5 },
     {
       $lookup: {
-        from: "hotels",
+        from: "hostels",
         localField: "_id",
         foreignField: "_id",
-        as: "hotelDetails",
+        as: "hostelDetails",
       },
     },
-    { $unwind: "$hotelDetails" },
+    { $unwind: "$hostelDetails" },
     {
       $project: {
         _id: 1,
         count: 1,
-        name: "$hotelDetails.name",
-        location: "$hotelDetails.location",
-        image: { $arrayElemAt: ["$hotelDetails.images", 0] },
+        name: "$hostelDetails.name",
+        location: "$hostelDetails.location",
+        image: { $arrayElemAt: ["$hostelDetails.images", 0] },
       },
     },
   ]);
@@ -140,6 +174,17 @@ export const getDashboardData = asyncHandler(async (req, res) => {
     },
   ]);
 
+  // Format payment status breakdown
+  const formattedPaymentBreakdown = paymentStatusBreakdown.reduce((acc, item) => {
+    acc[item._id] = {
+      count: item.count,
+      totalAmount: item.totalAmount || 0,
+      paidAmount: item.paidAmount || 0,
+      remainingAmount: item.remainingAmount || 0,
+    };
+    return acc;
+  }, {});
+
   res.status(200).json({
     success: true,
     data: {
@@ -147,30 +192,31 @@ export const getDashboardData = asyncHandler(async (req, res) => {
         users: totalUsers,
         employees: totalEmployees,
         bikes: totalBikes,
-        hotels: totalHotels,
+        hostels: totalHostels,
         products: totalProducts,
         bikeBookings,
-        hotelBookings,
+        hostelBookings,
         productOrders,
       },
       pendingActions: {
         bikeBookings: pendingBikeBookings,
-        hotelBookings: pendingHotelBookings,
+        hostelBookings: pendingHostelBookings,
         orders: pendingOrders,
-        total: pendingBikeBookings + pendingHotelBookings + pendingOrders,
+        total: pendingBikeBookings + pendingHostelBookings + pendingOrders,
       },
       earnings: {
         bikes: bikeEarnings.length > 0 ? bikeEarnings[0].total : 0,
-        hotels: hotelEarnings.length > 0 ? hotelEarnings[0].total : 0,
+        hostels: hostelEarnings.length > 0 ? hostelEarnings[0].total : 0,
         products: productEarnings.length > 0 ? productEarnings[0].total : 0,
         total:
           (bikeEarnings.length > 0 ? bikeEarnings[0].total : 0) +
-          (hotelEarnings.length > 0 ? hotelEarnings[0].total : 0) +
+          (hostelEarnings.length > 0 ? hostelEarnings[0].total : 0) +
           (productEarnings.length > 0 ? productEarnings[0].total : 0),
       },
+      paymentStatus: formattedPaymentBreakdown,
       popular: {
         bikes: popularBikes,
-        hotels: popularHotels,
+        hostels: popularHostels,
         products: popularProducts,
       },
     },
@@ -497,7 +543,11 @@ export const getAdminBookings = asyncHandler(async (req, res) => {
       select: "title brand model images",
     })
     .populate({
-      path: "hotel",
+      path: "bikeItems.bike",
+      select: "title brand model images",
+    })
+    .populate({
+      path: "hostel",
       select: "name location images",
     })
     .populate({
@@ -580,6 +630,103 @@ export const getAdminOrders = asyncHandler(async (req, res) => {
     page: Number.parseInt(page),
     pages: Math.ceil(total / Number.parseInt(limit)),
     data: orders,
+  });
+});
+
+// @desc    Mark remaining payment as completed (for offline/manual payments)
+// @route   PUT /api/admin/bookings/:id/complete-payment
+// @access  Private/Admin/Employee
+export const markPaymentCompleted = asyncHandler(async (req, res) => {
+  const { paymentMethod, paymentReference, notes } = req.body;
+
+  // Get booking
+  const booking = await Booking.findById(req.params.id)
+    .populate('user', 'name email mobile')
+    .populate('bike', 'title')
+    .populate('hostel', 'name');
+
+  if (!booking) {
+    throw new ApiError("Booking not found", 404);
+  }
+
+  // Check if payment is already completed
+  if (booking.paymentStatus === "completed") {
+    throw new ApiError("Payment already completed for this booking", 400);
+  }
+
+  // Check if there's remaining amount to pay
+  if (booking.paymentDetails.remainingAmount <= 0) {
+    throw new ApiError("No remaining amount to pay", 400);
+  }
+
+  // Calculate the amount being marked as paid
+  const remainingAmount = booking.paymentDetails.remainingAmount;
+  const isPartialPayment = booking.paymentStatus === "partial";
+
+  // Update payment details
+  booking.paymentDetails.paidAmount += remainingAmount;
+  booking.paymentDetails.remainingAmount = 0;
+  booking.paymentStatus = "completed";
+  booking.bookingStatus = "confirmed";
+
+  // Add to payment history
+  booking.paymentDetails.paymentHistory.push({
+    paymentId: `MANUAL_${Date.now()}`,
+    amount: remainingAmount,
+    paymentType: isPartialPayment ? "remaining" : "full",
+    status: "completed",
+    paidAt: new Date(),
+    createdAt: new Date(),
+    paymentMethod: paymentMethod || "offline",
+    paymentReference: paymentReference || "",
+    notes: notes || "Payment marked as completed by admin/employee",
+    markedBy: req.user?._id || req.employee?._id
+  });
+
+  await booking.save();
+
+  // Send confirmation email to user
+  try {
+    const emailSubject = isPartialPayment 
+      ? "✅ Remaining Payment Confirmed - Happy Go"
+      : "✅ Payment Confirmed - Happy Go";
+      
+    const emailContent = `
+      <h1>Payment Confirmed</h1>
+      <p>Dear ${booking.user.name},</p>
+      <p>Your ${isPartialPayment ? 'remaining' : ''} payment has been confirmed by our team.</p>
+      <p>Booking ID: ${booking._id}</p>
+      <p>Amount Confirmed: ₹${remainingAmount}</p>
+      <p>Total Paid: ₹${booking.paymentDetails.paidAmount}</p>
+      <p>Payment Method: ${paymentMethod || 'Offline'}</p>
+      ${paymentReference ? `<p>Reference: ${paymentReference}</p>` : ''}
+      <p>Your booking is now fully paid and confirmed.</p>
+      <p>Thank you for choosing HappyGo!</p>
+    `;
+
+    await sendEmail({
+      email: booking.user.email,
+      subject: emailSubject,
+      message: emailContent,
+      isHtml: true,
+    });
+  } catch (emailError) {
+    console.error("❌ Email sending failed:", emailError);
+    // Don't throw error, payment is already processed
+  }
+
+  res.status(200).json({
+    success: true,
+    message: "Payment marked as completed successfully",
+    data: {
+      booking: booking,
+      paymentDetails: {
+        amountConfirmed: remainingAmount,
+        totalPaid: booking.paymentDetails.paidAmount,
+        paymentStatus: booking.paymentStatus,
+        bookingStatus: booking.bookingStatus
+      }
+    }
   });
 });
 

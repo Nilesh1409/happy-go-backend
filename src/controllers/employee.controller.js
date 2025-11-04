@@ -126,17 +126,17 @@ export const getDashboardData = asyncHandler(async (req, res) => {
 
   // Initialize counts and recent items
   let bikeBookingsCount = 0;
-  let hotelBookingsCount = 0;
+  let hostelBookingsCount = 0;
   let ordersCount = 0;
 
   // Initialize pending actions
   let pendingBikeBookings = 0;
-  let pendingHotelBookings = 0;
+  let pendingHostelBookings = 0;
   let pendingOrders = 0;
 
   // Initialize recent items
   let recentBikeBookings = [];
-  let recentHotelBookings = [];
+  let recentHostelBookings = [];
   let recentOrders = [];
 
   // Get data based on employee's assigned modules
@@ -252,16 +252,16 @@ export const getDashboardData = asyncHandler(async (req, res) => {
     }
   }
 
-  if (req.employee.assignedModules.includes("hotel")) {
-    // Get hotel bookings count
-    hotelBookingsCount = await Booking.countDocuments({
-      bookingType: "hotel",
+  if (req.employee.assignedModules.includes("hostel")) {
+    // Get hostel bookings count
+    hostelBookingsCount = await Booking.countDocuments({
+      bookingType: "hostel",
       createdAt: { $gte: oneWeekAgo },
     });
 
-    // Get pending hotel bookings (pending or confirmed but not completed)
-    pendingHotelBookings = await Booking.countDocuments({
-      bookingType: "hotel",
+    // Get pending hostel bookings (pending or confirmed but not completed)
+    pendingHostelBookings = await Booking.countDocuments({
+      bookingType: "hostel",
       createdAt: { $gte: oneWeekAgo },
       $or: [
         { bookingStatus: "pending" },
@@ -269,13 +269,13 @@ export const getDashboardData = asyncHandler(async (req, res) => {
       ],
     });
 
-    // Get recent hotel bookings
-    recentHotelBookings = await Booking.find({
-      bookingType: "hotel",
+    // Get recent hostel bookings
+    recentHostelBookings = await Booking.find({
+      bookingType: "hostel",
       createdAt: { $gte: oneWeekAgo },
     })
       .populate({
-        path: "hotel",
+        path: "hostel",
         select: "name location images",
       })
       .populate({
@@ -285,27 +285,27 @@ export const getDashboardData = asyncHandler(async (req, res) => {
       .sort({ createdAt: -1 })
       .limit(5);
 
-    // Add pending status to hotel details
-    if (recentHotelBookings.length > 0) {
-      // Get all hotel IDs from recent bookings
-      const hotelIds = recentHotelBookings.map((booking) => booking.hotel._id);
+    // Add pending status to hostel details
+    if (recentHostelBookings.length > 0) {
+      // Get all hostel IDs from recent bookings
+      const hostelIds = recentHostelBookings.map((booking) => booking.hostel._id);
 
-      // Get pending bookings for these hotels (same logic as pendingHotelBookings count)
-      const pendingBookingsForHotels = await Booking.find({
-        bookingType: "hotel",
-        hotel: { $in: hotelIds },
+      // Get pending bookings for these hostels (same logic as pendingHostelBookings count)
+      const pendingBookingsForHostels = await Booking.find({
+        bookingType: "hostel",
+        hostel: { $in: hostelIds },
         createdAt: { $gte: oneWeekAgo },
         $or: [
           { bookingStatus: "pending" },
           { bookingStatus: "confirmed", endDate: { $lte: new Date() } },
         ],
-      }).select("hotel bookingStatus specialRequests createdAt endDate");
+      }).select("hostel bookingStatus specialRequests createdAt endDate");
 
-      // Create a map of hotel ID to pending info
-      const pendingHotelMap = {};
-      pendingBookingsForHotels.forEach((booking) => {
-        const hotelId = booking.hotel.toString();
-        if (!pendingHotelMap[hotelId]) {
+      // Create a map of hostel ID to pending info
+      const pendingHostelMap = {};
+      pendingBookingsForHostels.forEach((booking) => {
+        const hostelId = booking.hostel.toString();
+        if (!pendingHostelMap[hostelId]) {
           let pendingReason = "Awaiting payment confirmation";
 
           if (booking.bookingStatus === "pending") {
@@ -318,7 +318,7 @@ export const getDashboardData = asyncHandler(async (req, res) => {
             pendingReason = "Booking overdue - needs completion";
           }
 
-          pendingHotelMap[hotelId] = {
+          pendingHostelMap[hostelId] = {
             pending: true,
             pendingReason: pendingReason,
             pendingSince: booking.createdAt,
@@ -326,18 +326,18 @@ export const getDashboardData = asyncHandler(async (req, res) => {
         }
       });
 
-      // Add pending status to hotel details in recent bookings
-      recentHotelBookings = recentHotelBookings.map((booking) => {
+      // Add pending status to hostel details in recent bookings
+      recentHostelBookings = recentHostelBookings.map((booking) => {
         const bookingObj = booking.toObject();
-        const hotelId = booking.hotel._id.toString();
+        const hostelId = booking.hostel._id.toString();
 
-        if (pendingHotelMap[hotelId]) {
-          bookingObj.hotel.pending = true;
-          bookingObj.hotel.pendingReason =
-            pendingHotelMap[hotelId].pendingReason;
-          bookingObj.hotel.pendingSince = pendingHotelMap[hotelId].pendingSince;
+        if (pendingHostelMap[hostelId]) {
+          bookingObj.hostel.pending = true;
+          bookingObj.hostel.pendingReason =
+            pendingHostelMap[hostelId].pendingReason;
+          bookingObj.hostel.pendingSince = pendingHostelMap[hostelId].pendingSince;
         } else {
-          bookingObj.hotel.pending = false;
+          bookingObj.hostel.pending = false;
         }
 
         return bookingObj;
@@ -399,28 +399,28 @@ export const getDashboardData = asyncHandler(async (req, res) => {
   }
 
   // Calculate total counts and pending actions
-  const totalCount = bikeBookingsCount + hotelBookingsCount + ordersCount;
+  const totalCount = bikeBookingsCount + hostelBookingsCount + ordersCount;
   const totalPendingActions =
-    pendingBikeBookings + pendingHotelBookings + pendingOrders;
+    pendingBikeBookings + pendingHostelBookings + pendingOrders;
 
   res.status(200).json({
     success: true,
     data: {
       counts: {
         bikeBookings: bikeBookingsCount,
-        hotelBookings: hotelBookingsCount,
+        hostelBookings: hostelBookingsCount,
         orders: ordersCount,
         total: totalCount,
       },
       pendingActions: {
         bikeBookings: pendingBikeBookings,
-        hotelBookings: pendingHotelBookings,
+        hostelBookings: pendingHostelBookings,
         orders: pendingOrders,
         total: totalPendingActions,
       },
       recent: {
         bikeBookings: recentBikeBookings,
-        hotelBookings: recentHotelBookings,
+        hostelBookings: recentHostelBookings,
         orders: recentOrders,
       },
     },
@@ -506,7 +506,11 @@ export const getEmployeeBookings = asyncHandler(async (req, res) => {
       select: "title brand model images registrationNumber",
     })
     .populate({
-      path: "hotel",
+      path: "bikeItems.bike",
+      select: "title brand model images",
+    })
+    .populate({
+      path: "hostel",
       select: "name location images rooms",
     })
     .populate({
@@ -518,47 +522,105 @@ export const getEmployeeBookings = asyncHandler(async (req, res) => {
     .limit(Number.parseInt(limit));
 
   // Format bookings for response
-  const formattedBookings = bookings.map((booking) => {
-    let itemName = "";
-    let itemImage = "";
+  const formattedBookings = await Promise.all(
+    bookings.map(async (booking) => {
+      let itemName = "";
+      let itemImage = "";
 
-    if (booking.bookingType === "bike" && booking.bike) {
-      itemName = `${booking.bike.brand} ${booking.bike.model}`;
-      itemImage =
-        booking.bike.images && booking.bike.images.length > 0
-          ? booking.bike.images[0]
-          : "";
-    } else if (booking.bookingType === "hotel" && booking.hotel) {
-      const roomType = booking.roomType || "Standard Room";
-      itemName = `${roomType} - ${booking.hotel.name}`;
-      itemImage =
-        booking.hotel.images && booking.hotel.images.length > 0
-          ? booking.hotel.images[0]
-          : "";
-    }
+      if (booking.bookingType === "bike" && booking.bike) {
+        itemName = `${booking.bike.brand} ${booking.bike.model}`;
+        itemImage =
+          booking.bike.images && booking.bike.images.length > 0
+            ? booking.bike.images[0]
+            : "";
+      } else if (booking.bookingType === "bike" && booking.bikeItems && booking.bikeItems.length > 0) {
+        const totalBikes = booking.bikeItems.reduce((sum, item) => sum + item.quantity, 0);
+        itemName = `${totalBikes} bike(s)`;
+        itemImage =
+          booking.bikeItems[0].bike?.images && booking.bikeItems[0].bike.images.length > 0
+            ? booking.bikeItems[0].bike.images[0]
+            : "";
+      } else if (booking.bookingType === "hostel" && booking.hostel) {
+        const roomType = booking.roomType || "Standard Room";
+        itemName = `${roomType} - ${booking.hostel.name}`;
+        itemImage =
+          booking.hostel.images && booking.hostel.images.length > 0
+            ? booking.hostel.images[0]
+            : "";
+      }
 
-    return {
-      id: booking._id,
-      bookingType:
-        booking.bookingType.charAt(0).toUpperCase() +
-        booking.bookingType.slice(1),
-      customerName: booking.user ? booking.user.name : "Unknown Customer",
-      customerPhone: booking.user ? booking.user.mobile : "N/A",
-      customerEmail: booking.user ? booking.user.email : "N/A",
-      itemName,
-      itemImage,
-      startDate: booking.startDate,
-      endDate: booking.endDate,
-      totalAmount: booking.priceDetails.totalAmount,
-      status:
-        booking.bookingStatus.charAt(0).toUpperCase() +
-        booking.bookingStatus.slice(1),
-      paymentStatus:
-        booking.paymentStatus.charAt(0).toUpperCase() +
-        booking.paymentStatus.slice(1),
-      createdAt: booking.createdAt,
-    };
-  });
+      // Calculate proportional paid amount for combined bookings
+      let actualPaidAmount = booking.paymentDetails?.paidAmount || 0;
+      let actualPaymentStatus = booking.paymentStatus;
+      let isCombinedBooking = false;
+
+      console.log("🚀 ~ formattedBookings ~ booking: booking.paymentGroupId", booking.paymentGroupId);
+      if (booking.paymentGroupId) {
+        isCombinedBooking = true;
+
+        // Get all bookings in this payment group
+        const relatedBookings = await Booking.find({
+          paymentGroupId: booking.paymentGroupId,
+        }).select("priceDetails paymentDetails");
+
+        // Calculate combined total
+        const combinedTotal = relatedBookings.reduce(
+          (sum, b) => sum + (b.priceDetails?.totalAmount || 0),
+          0
+        );
+
+        // Get actual paid amount from payment history
+        let totalPaidFromHistory = 0;
+        const paymentHistory = booking.paymentDetails?.paymentHistory || [];
+        
+        for (const payment of paymentHistory) {
+          if (payment.status === "completed") {
+            totalPaidFromHistory += payment.amount || 0;
+          }
+        }
+
+        // Calculate proportional amount for THIS booking
+        const thisBookingTotal = booking.priceDetails?.totalAmount || 0;
+        const proportion = thisBookingTotal / combinedTotal;
+        actualPaidAmount = Math.round(totalPaidFromHistory * proportion);
+
+        // Determine payment status based on proportional paid amount
+        if (actualPaidAmount === 0) {
+          actualPaymentStatus = "pending";
+        } else if (actualPaidAmount < thisBookingTotal) {
+          actualPaymentStatus = "partial";
+        } else {
+          actualPaymentStatus = "completed";
+        }
+      }
+
+      return {
+        id: booking._id,
+        bookingType:
+          booking.bookingType.charAt(0).toUpperCase() +
+          booking.bookingType.slice(1),
+        customerName: booking.user ? booking.user.name : "Unknown Customer",
+        customerPhone: booking.user ? booking.user.mobile : "N/A",
+        customerEmail: booking.user ? booking.user.email : "N/A",
+        itemName,
+        itemImage,
+        startDate: booking.startDate,
+        endDate: booking.endDate,
+        totalAmount: booking.priceDetails.totalAmount,
+        paidAmount: actualPaidAmount,
+        remainingAmount: booking.priceDetails.totalAmount - actualPaidAmount,
+        status:
+          booking.bookingStatus.charAt(0).toUpperCase() +
+          booking.bookingStatus.slice(1),
+        paymentStatus:
+          actualPaymentStatus.charAt(0).toUpperCase() +
+          actualPaymentStatus.slice(1),
+        isCombined: isCombinedBooking,
+        ...(isCombinedBooking && { paymentGroupId: booking.paymentGroupId }),
+        createdAt: booking.createdAt,
+      };
+    })
+  );
 
   res.status(200).json({
     success: true,
@@ -584,7 +646,7 @@ export const getEmployeeBookingById = asyncHandler(async (req, res) => {
       select: "title brand model images registrationNumber pricePerDay quantity availableQuantity location features termsAndConditions additionalKmPrice",
     })
     .populate({
-      path: "hotel",
+      path: "hostel",
       select: "name location images rooms",
     })
     .populate({
@@ -707,24 +769,27 @@ export const getEmployeeBookingById = asyncHandler(async (req, res) => {
         formattedBooking.additionalCharges = booking.bikeDetails.additionalCharges;
       }
     }
-  } else if (booking.bookingType === "hotel" && booking.hotel) {
-    formattedBooking.hotel = {
-      name: booking.hotel.name,
-      location: booking.hotel.location,
+  } else if (booking.bookingType === "hostel" && booking.hostel) {
+    formattedBooking.hostel = {
+      name: booking.hostel.name,
+      location: booking.hostel.location,
       image:
-        booking.hotel.images && booking.hotel.images.length > 0
-          ? booking.hotel.images[0]
+        booking.hostel.images && booking.hostel.images.length > 0
+          ? booking.hostel.images[0]
           : "",
     };
 
-    formattedBooking.checkInDate = booking.startDate;
-    formattedBooking.checkOutDate = booking.endDate;
+    formattedBooking.checkInDate = booking.checkIn || booking.startDate;
+    formattedBooking.checkOutDate = booking.checkOut || booking.endDate;
     formattedBooking.roomType = booking.roomType;
+    formattedBooking.numberOfBeds = booking.numberOfBeds;
+    formattedBooking.mealOption = booking.mealOption;
+    formattedBooking.numberOfNights = booking.numberOfNights;
     formattedBooking.guests = booking.numberOfPeople;
 
-    if (booking.hotelDetails) {
-      formattedBooking.roomOption = booking.hotelDetails.roomOption;
-      formattedBooking.checkInTime = booking.hotelDetails.checkInTime;
+    if (booking.hostelDetails) {
+      formattedBooking.stayType = booking.hostelDetails.stayType;
+      formattedBooking.checkInTime = booking.hostelDetails.checkInTime;
     }
   }
 
@@ -782,7 +847,11 @@ export const getAssignedBookings = asyncHandler(async (req, res) => {
       select: "title brand model images",
     })
     .populate({
-      path: "hotel",
+      path: "bikeItems.bike",
+      select: "title brand model images",
+    })
+    .populate({
+      path: "hostel",
       select: "name location images",
     })
     .populate({

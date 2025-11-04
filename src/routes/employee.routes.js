@@ -23,6 +23,8 @@ import {
   getEmployeeBookingById,
 } from "../controllers/employee.controller.js";
 
+import { markPaymentCompleted } from "../controllers/admin.controller.js";
+
 import {
   getHotels,
   getHotelById,
@@ -104,6 +106,7 @@ router.get(
 router.get("/bookings", employeeProtect, getEmployeeBookings);
 router.get("/bookings/:id", employeeProtect, getEmployeeBookingById);
 router.put("/bookings/:id/status", employeeProtect, updateBookingStatus);
+router.put("/bookings/:id/complete-payment", employeeProtect, markPaymentCompleted);
 
 // Order routes
 router.get(

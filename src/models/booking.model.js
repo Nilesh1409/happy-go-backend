@@ -75,7 +75,7 @@ const bookingSchema = new mongoose.Schema(
     bookingType: {
       type: String,
       required: [true, "Please add a booking type"],
-      enum: ["bike", "hotel"],
+      enum: ["bike", "hostel"],
     },
     // For bike bookings - supports both single bike and multiple bikes
     bike: {
@@ -86,20 +86,43 @@ const bookingSchema = new mongoose.Schema(
       },
     },
     bikeItems: [bookingItemSchema],
-    // For hotel bookings (unchanged)
-    hotel: {
+    // For hostel bookings
+    hostel: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "Hotel",
+      ref: "Hostel",
       required: function () {
-        return this.bookingType === "hotel"
+        return this.bookingType === "hostel"
       },
     },
     roomType: {
       type: String,
       required: function () {
-        return this.bookingType === "hotel"
+        return this.bookingType === "hostel"
       },
     },
+    // Hostel-specific fields
+    mealOption: {
+      type: String,
+      enum: ["bedOnly", "bedAndBreakfast", "bedBreakfastAndDinner"],
+      required: function () {
+        return this.bookingType === "hostel"
+      },
+    },
+    numberOfBeds: {
+      type: Number,
+      required: function () {
+        return this.bookingType === "hostel"
+      },
+      min: [1, "Number of beds must be at least 1"],
+    },
+    numberOfNights: {
+      type: Number,
+      required: function () {
+        return this.bookingType === "hostel"
+      },
+      min: [1, "Number of nights must be at least 1"],
+    },
+    // Common date fields for all booking types
     startDate: {
       type: Date,
       required: [true, "Please add a start date"],
@@ -107,6 +130,13 @@ const bookingSchema = new mongoose.Schema(
     endDate: {
       type: Date,
       required: [true, "Please add an end date"],
+    },
+    // Hostel check-in/check-out dates (aliases for startDate/endDate)
+    checkIn: {
+      type: Date,
+    },
+    checkOut: {
+      type: Date,
     },
     startTime: {
       type: String,
@@ -122,9 +152,6 @@ const bookingSchema = new mongoose.Schema(
     },
     numberOfPeople: {
       type: Number,
-      required: function () {
-        return this.bookingType === "hotel"
-      },
       min: [1, "Number of people must be at least 1"],
     },
     priceDetails: {
@@ -181,11 +208,73 @@ const bookingSchema = new mongoose.Schema(
     },
     paymentStatus: {
       type: String,
-      enum: ["pending", "completed", "failed", "refunded"],
+      enum: ["pending", "partial", "completed", "failed", "refunded"],
       default: "pending",
     },
     paymentId: {
       type: String,
+    },
+    // Payment group ID for linking multiple bookings in a single transaction
+    paymentGroupId: {
+      type: String,
+      index: true,
+    },
+    // Partial payment tracking
+    paymentDetails: {
+      totalAmount: {
+        type: Number,
+        required: true,
+        default: 0,
+      },
+      paidAmount: {
+        type: Number,
+        default: 0,
+      },
+      remainingAmount: {
+        type: Number,
+        default: 0,
+      },
+      partialPaymentPercentage: {
+        type: Number,
+        default: 25, // 25% initial payment
+        min: 1,
+        max: 100,
+      },
+      paymentHistory: [
+        {
+          paymentId: {
+            type: String,
+            required: true,
+          },
+          amount: {
+            type: Number,
+            required: true,
+          },
+          paymentType: {
+            type: String,
+            enum: ["partial", "remaining", "full"],
+            required: true,
+          },
+          razorpayOrderId: {
+            type: String,
+          },
+          razorpayPaymentId: {
+            type: String,
+          },
+          status: {
+            type: String,
+            enum: ["pending", "completed", "failed"],
+            default: "pending",
+          },
+          paidAt: {
+            type: Date,
+          },
+          createdAt: {
+            type: Date,
+            default: Date.now,
+          },
+        },
+      ],
     },
     bookingStatus: {
       type: String,
@@ -250,42 +339,15 @@ const bookingSchema = new mongoose.Schema(
         },
       },
     },
-    // Hotel details (unchanged)
-    hotelDetails: {
-      roomOptions: {
-        bedOnly: {
-          quantity: {
-            type: Number,
-            default: 0,
-          },
-          pricePerUnit: {
-            type: Number,
-            default: 0,
-          },
-        },
-        bedAndBreakfast: {
-          quantity: {
-            type: Number,
-            default: 0,
-          },
-          pricePerUnit: {
-            type: Number,
-            default: 0,
-          },
-        },
-        bedBreakfastAndDinner: {
-          quantity: {
-            type: Number,
-            default: 0,
-          },
-          pricePerUnit: {
-            type: Number,
-            default: 0,
-          },
-        },
-      },
+    // Hostel details
+    hostelDetails: {
       checkInTime: {
         type: String,
+      },
+      stayType: {
+        type: String,
+        enum: ["hostel", "workstation"],
+        default: "hostel",
       },
     },
     couponCode: {

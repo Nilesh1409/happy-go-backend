@@ -1,7 +1,8 @@
 import Booking from "../models/booking.model.js";
 import Bike from "../models/bike.model.js";
-import Hotel from "../models/hotel.model.js";
+import Hostel from "../models/hostel.model.js";
 import User from "../models/user.model.js";
+import Cart from "../models/cart.model.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import { sendEmail } from "../utils/sendEmail.js";
@@ -23,16 +24,18 @@ export const createBooking = asyncHandler(async (req, res) => {
     // Multiple bike booking (new)
     bikeItems,
     // Common fields
-    hotelId,
+    hostelId,
     roomType,
     startDate,
     endDate,
     startTime,
     endTime,
     numberOfPeople,
+    numberOfBeds,
+    mealOption,
     priceDetails,
     bikeDetails,
-    hotelDetails,
+    hostelDetails,
     couponCode,
     specialRequests,
     guestDetails,
@@ -40,7 +43,7 @@ export const createBooking = asyncHandler(async (req, res) => {
   } = req.body;
 
   // Validate booking type
-  if (!bookingType || !["bike", "hotel"].includes(bookingType)) {
+  if (!bookingType || !["bike", "hostel"].includes(bookingType)) {
     throw new ApiError("Invalid booking type", 400);
   }
 
@@ -367,6 +370,10 @@ export const createBooking = asyncHandler(async (req, res) => {
       }
     }
 
+    // Initialize payment details for partial payment support
+    const totalAmount = priceDetails.totalAmount;
+    const partialPaymentPercentage = 25; // 25% initial payment
+
     // Create booking with either single bike or multiple bikes
     const bookingData = {
       user: req.user._id,
@@ -384,6 +391,15 @@ export const createBooking = asyncHandler(async (req, res) => {
       specialRequests,
       guestDetails,
       bookingStatus: "pending",
+      paymentStatus: "pending",
+      // Initialize payment details for partial payment tracking
+      paymentDetails: {
+        totalAmount: totalAmount,
+        paidAmount: 0,
+        remainingAmount: totalAmount,
+        partialPaymentPercentage: partialPaymentPercentage,
+        paymentHistory: []
+      }
     };
 
     if (isMultipleBikes) {
@@ -400,6 +416,20 @@ export const createBooking = asyncHandler(async (req, res) => {
     }
 
     const booking = await Booking.create(bookingData);
+
+    // Clear cart after booking creation
+    const cart = await Cart.findOne({ user: req.user._id, isActive: true });
+    if (cart) {
+      // Clear bike items from cart
+      cart.bikeItems = [];
+      cart.pricing.bikeSubtotal = 0;
+      cart.pricing.subtotal = cart.pricing.hostelSubtotal;
+      cart.pricing.gst = (cart.pricing.subtotal * cart.pricing.gstPercentage) / 100;
+      cart.pricing.total = cart.pricing.subtotal + cart.pricing.gst;
+      cart.helmetDetails.quantity = 0;
+      cart.helmetDetails.charges = 0;
+      await cart.save();
+    }
 
     // Update bike availability for all bikes
     if (isMultipleBikes) {
@@ -455,48 +485,78 @@ export const createBooking = asyncHandler(async (req, res) => {
     //   message: emailMessage,
     // });
 
+    // Calculate partial payment amounts for response
+    const partialAmount = Math.round((totalAmount * partialPaymentPercentage) / 100);
+
     return res.status(201).json({
       success: true,
-      data: booking,
+      data: {
+        ...booking.toObject(),
+        paymentOptions: {
+          partialPayment: {
+            amount: partialAmount,
+            percentage: partialPaymentPercentage
+          },
+          fullPayment: {
+            amount: totalAmount,
+            percentage: 100
+          }
+        }
+      },
     });
-  } else if (bookingType === "hotel") {
-    // Hotel booking logic remains unchanged
+  } else if (bookingType === "hostel") {
+    // Hostel booking logic
     if (
-      !hotelId ||
+      !hostelId ||
       !roomType ||
       !startDate ||
       !endDate ||
-      !numberOfPeople ||
-      !hotelDetails
+      !numberOfBeds ||
+      !mealOption
     ) {
       throw new ApiError(
-        "Please provide all required fields for hotel booking",
+        `Please provide all required fields for hostel booking (hostelId, roomType, startDate, endDate, numberOfBeds, mealOption)`,
         400
       );
     }
 
-    // Check if hotel exists
-    const hotel = await Hotel.findById(hotelId);
-    if (!hotel) {
-      throw new ApiError("Hotel not found", 404);
+    // Validate stayType for hostel bookings (optional field)
+    if (hostelDetails?.stayType && 
+        !["hostel", "workstation"].includes(hostelDetails.stayType)) {
+      throw new ApiError("Invalid stay type. Must be 'hostel' or 'workstation'", 400);
+    }
+
+    // Validate meal option
+    if (!["bedOnly", "bedAndBreakfast", "bedBreakfastAndDinner"].includes(mealOption)) {
+      throw new ApiError("Invalid meal option. Must be 'bedOnly', 'bedAndBreakfast', or 'bedBreakfastAndDinner'", 400);
+    }
+
+    // Check if hostel exists
+    const hostel = await Hostel.findById(hostelId);
+    if (!hostel) {
+      throw new ApiError("Hostel not found", 404);
     }
 
     // Check if room type exists
-    const room = hotel.rooms.find((r) => r.type === roomType);
+    const room = hostel.rooms.find((r) => r.type === roomType);
     if (!room) {
-      throw new ApiError("Room type not found", 404);
+      throw new ApiError("Room type not found in this hostel", 404);
     }
 
-    // Calculate total rooms needed based on room options
-    const totalRoomsNeeded =
-      (hotelDetails.roomOptions?.bedOnly?.quantity || 0) +
-      (hotelDetails.roomOptions?.bedAndBreakfast?.quantity || 0) +
-      (hotelDetails.roomOptions?.bedBreakfastAndDinner?.quantity || 0);
+    // For workstation bookings, verify room is workstation-friendly
+    if (hostelDetails?.stayType === "workstation" && !room.isWorkstationFriendly) {
+      throw new ApiError("Selected room is not available for workstation stays", 400);
+    }
 
-    // Check if enough rooms are available
+    // Validate meal option exists for this room
+    if (!room.mealOptions[mealOption]) {
+      throw new ApiError(`Meal option '${mealOption}' is not available for this room type`, 400);
+    }
+
+    // Check if enough beds are available
     const existingBookings = await Booking.find({
-      bookingType: "hotel",
-      hotel: hotelId,
+      bookingType: "hostel",
+      hostel: hostelId,
       roomType,
       $or: [
         {
@@ -507,78 +567,434 @@ export const createBooking = asyncHandler(async (req, res) => {
       bookingStatus: { $nin: ["cancelled"] },
     });
 
-    // Calculate total booked rooms
-    let totalBookedRooms = 0;
+    // Calculate total booked beds for this room type
+    let totalBookedBeds = 0;
     existingBookings.forEach((booking) => {
-      if (booking.hotelDetails && booking.hotelDetails.roomOptions) {
-        totalBookedRooms +=
-          (booking.hotelDetails.roomOptions.bedOnly?.quantity || 0) +
-          (booking.hotelDetails.roomOptions.bedAndBreakfast?.quantity || 0) +
-          (booking.hotelDetails.roomOptions.bedBreakfastAndDinner?.quantity ||
-            0);
-      } else {
-        // For backward compatibility with old bookings
-        totalBookedRooms += 1;
-      }
+      totalBookedBeds += booking.numberOfBeds || 1;
     });
 
-    if (totalBookedRooms + totalRoomsNeeded > room.totalRooms) {
+    if (totalBookedBeds + numberOfBeds > room.totalBeds) {
       throw new ApiError(
         `Only ${
-          room.totalRooms - totalBookedRooms
-        } rooms available for the selected dates`,
+          room.totalBeds - totalBookedBeds
+        } beds available for the selected dates in this room type`,
         400
       );
     }
 
-    // Create hotel booking
+    // Calculate number of nights
+    const checkInDate = new Date(startDate);
+    const checkOutDate = new Date(endDate);
+    const numberOfNights = Math.ceil((checkOutDate - checkInDate) / (1000 * 60 * 60 * 24));
+
+    // Initialize payment details for partial payment support
+    const totalAmount = priceDetails.totalAmount;
+    const partialPaymentPercentage = 25; // 25% initial payment
+    const partialAmount = Math.round((totalAmount * partialPaymentPercentage) / 100);
+    const remainingAmount = totalAmount - partialAmount;
+
+    // Create hostel booking with payment tracking
     const booking = await Booking.create({
       user: req.user._id,
-      bookingType,
-      hotel: hotelId,
+      bookingType: "hostel",
+      hostel: hostelId,
       roomType,
+      mealOption,
+      numberOfBeds,
       startDate,
       endDate,
-      numberOfPeople,
+      checkIn: startDate,
+      checkOut: endDate,
+      numberOfNights,
+      numberOfPeople: numberOfPeople || numberOfBeds,
       priceDetails,
-      hotelDetails,
+      hostelDetails: hostelDetails || {},
       couponCode,
       specialRequests,
       guestDetails,
       bookingStatus: "pending",
+      paymentStatus: "pending",
+      // Initialize payment details
+      paymentDetails: {
+        totalAmount: totalAmount,
+        paidAmount: 0,
+        remainingAmount: totalAmount,
+        partialPaymentPercentage: partialPaymentPercentage,
+        paymentHistory: []
+      }
     });
+
+    // Clear hostel items from cart after booking creation
+    const cart = await Cart.findOne({ user: req.user._id, isActive: true });
+    if (cart) {
+      // Clear hostel items from cart
+      cart.hostelItems = [];
+      cart.pricing.hostelSubtotal = 0;
+      cart.pricing.subtotal = cart.pricing.bikeSubtotal;
+      cart.pricing.gst = (cart.pricing.subtotal * cart.pricing.gstPercentage) / 100;
+      cart.pricing.total = cart.pricing.subtotal + cart.pricing.gst;
+      await cart.save();
+    }
 
     // Send confirmation email
     const user = await User.findById(req.user._id);
     const emailMessage = `
-      <h1>Hotel Booking Confirmation</h1>
+      <h1>Hostel Booking Created</h1>
       <p>Dear ${user.name},</p>
-      <p>Your hotel booking has been confirmed.</p>
+      <p>Your hostel booking has been created and is pending payment.</p>
       <p>Booking ID: ${booking._id}</p>
-      <p>Start Date: ${new Date(startDate).toLocaleDateString()}</p>
-      <p>End Date: ${new Date(endDate).toLocaleDateString()}</p>
+      <p>Hostel: ${hostel.name}</p>
+      <p>Room Type: ${roomType}</p>
+      <p>Meal Option: ${mealOption}</p>
+      <p>Number of Beds: ${numberOfBeds}</p>
+      <p>Check-in Date: ${new Date(startDate).toLocaleDateString()}</p>
+      <p>Check-out Date: ${new Date(endDate).toLocaleDateString()}</p>
+      <p>Number of Nights: ${numberOfNights}</p>
       <p>Total Amount: ₹${priceDetails.totalAmount}</p>
+      <p>You can pay 25% (₹${partialAmount}) now to confirm your booking, or pay the full amount.</p>
       <p>Thank you for choosing HappyGo!</p>
     `;
 
     await sendEmail({
       email: user.email,
-      subject: "HappyGo Hotel Booking Confirmation",
+      subject: "HappyGo Hostel Booking Created",
       message: emailMessage,
     });
 
     return res.status(201).json({
       success: true,
-      data: booking,
+      data: {
+        ...booking.toObject(),
+        paymentOptions: {
+          partialPayment: {
+            amount: partialAmount,
+            percentage: partialPaymentPercentage
+          },
+          fullPayment: {
+            amount: totalAmount,
+            percentage: 100
+          }
+        }
+      },
     });
   }
 });
 
-// @desc    Get all bookings
+// @desc    Create booking from cart (handles bike + hostel together)
+// @route   POST /api/bookings/cart
+// @access  Private
+export const createCartBooking = asyncHandler(async (req, res) => {
+  const { guestDetails, specialRequests, partialPaymentPercentage = 25 } = req.body;
+
+  // Validate partial payment percentage
+  if (partialPaymentPercentage < 1 || partialPaymentPercentage > 100) {
+    throw new ApiError("Partial payment percentage must be between 1 and 100", 400);
+  }
+
+  // Get user's active cart with populated data
+  const cart = await Cart.findOne({
+    user: req.user._id,
+    isActive: true,
+  })
+    .sort({ updatedAt: -1 })
+    .populate("bikeItems.bike")
+    .populate("hostelItems.hostel");
+
+  if (!cart || (cart.bikeItems.length === 0 && cart.hostelItems.length === 0)) {
+    throw new ApiError("Cart is empty. Please add items to cart before checkout.", 400);
+  }
+
+  // Generate unique payment group ID
+  const paymentGroupId = `PG_${Date.now()}_${req.user._id}`;
+  const createdBookings = [];
+  let totalCartAmount = 0;
+
+  // ===== CREATE BIKE BOOKING IF CART HAS BIKES =====
+  if (cart.bikeItems.length > 0) {
+    // Calculate bike pricing with GST
+    const bikeSubtotal = cart.pricing.bikeSubtotal || 0;
+    const helmetCharges = cart.helmetDetails?.charges || 0;
+    const bikeBaseAmount = bikeSubtotal + helmetCharges;
+    const bikeGst = Math.round((bikeBaseAmount * 5) / 100);
+    const bikeTotalAmount = bikeBaseAmount + bikeGst;
+
+    // Calculate number of days
+    const startDate = new Date(cart.bikeDates.startDate);
+    const endDate = new Date(cart.bikeDates.endDate);
+    const daysDiff = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24));
+    const totalDays = daysDiff === 0 ? 1 : daysDiff + 1;
+
+    const bikeBooking = await Booking.create({
+      user: req.user._id,
+      bookingType: "bike",
+      bikeItems: cart.bikeItems.map((item) => ({
+        bike: item.bike._id,
+        quantity: item.quantity,
+        kmOption: item.kmOption,
+        pricePerUnit: item.pricePerUnit,
+        totalPrice: item.totalPrice,
+        kmLimit: item.kmLimit,
+        additionalKmPrice: item.additionalKmPrice || 5,
+        bikeTitle: item.bike.title,
+        bikeModel: item.bike.model,
+        bikeBrand: item.bike.brand,
+      })),
+      startDate: cart.bikeDates.startDate,
+      endDate: cart.bikeDates.endDate,
+      startTime: cart.bikeDates.startTime,
+      endTime: cart.bikeDates.endTime,
+      helmetQuantity: cart.helmetDetails?.quantity || 0,
+      priceDetails: {
+        basePrice: bikeSubtotal,
+        subtotal: bikeSubtotal,
+        helmetCharges: helmetCharges,
+        extraCharges: 0,
+        taxes: bikeGst,
+        gst: bikeGst,
+        gstPercentage: 5,
+        discount: 0,
+        totalAmount: bikeTotalAmount,
+      },
+      bikeDetails: {
+        totalDays: totalDays,
+        kmOption: cart.bikeItems[0]?.kmOption || "unlimited",
+      },
+      guestDetails: guestDetails || {
+        name: req.user.name,
+        email: req.user.email,
+        phone: req.user.mobile || req.user.phone,
+      },
+      specialRequests: specialRequests || "",
+      paymentGroupId,
+      bookingStatus: "pending",
+      paymentStatus: "pending",
+      paymentDetails: {
+        totalAmount: bikeTotalAmount,
+        paidAmount: 0,
+        remainingAmount: bikeTotalAmount,
+        partialPaymentPercentage,
+        paymentHistory: [],
+      },
+    });
+
+    // Update bike availability
+    for (const item of cart.bikeItems) {
+      const bike = await Bike.findById(item.bike._id);
+      if (bike) {
+        bike.availableQuantity = Math.max(0, bike.availableQuantity - item.quantity);
+        if (bike.availableQuantity <= 0) {
+          bike.status = "booked";
+        }
+        await bike.save();
+      }
+    }
+
+    createdBookings.push({
+      bookingId: bikeBooking._id,
+      type: "bike",
+      amount: bikeTotalAmount,
+      breakdown: {
+        basePrice: bikeSubtotal,
+        helmetCharges: helmetCharges,
+        gst: bikeGst,
+        gstPercentage: 5,
+        discount: 0,
+        totalAmount: bikeTotalAmount,
+      },
+      dates: {
+        pickupDate: cart.bikeDates.startDate,
+        dropDate: cart.bikeDates.endDate,
+        pickupTime: cart.bikeDates.startTime,
+        dropTime: cart.bikeDates.endTime,
+        totalDays: totalDays,
+      },
+      items: cart.bikeItems.map((item) => ({
+        bikeName: item.bike.title,
+        brand: item.bike.brand,
+        model: item.bike.model,
+        quantity: item.quantity,
+        kmOption: item.kmOption,
+        pricePerUnit: item.pricePerUnit,
+      })),
+      helmets: cart.helmetDetails?.quantity || 0,
+    });
+
+    totalCartAmount += bikeTotalAmount;
+  }
+
+  // ===== CREATE HOSTEL BOOKING IF CART HAS HOSTELS =====
+  if (cart.hostelItems.length > 0) {
+    // For now, support single hostel item (can be extended for multiple)
+    const hostelItem = cart.hostelItems[0];
+
+    // Calculate hostel pricing with GST
+    const hostelSubtotal = cart.pricing.hostelSubtotal || 0;
+    const hostelGst = Math.round((hostelSubtotal * 5) / 100);
+    const hostelTotalAmount = hostelSubtotal + hostelGst;
+
+    const hostelBooking = await Booking.create({
+      user: req.user._id,
+      bookingType: "hostel",
+      hostel: hostelItem.hostel._id,
+      roomType: hostelItem.roomType,
+      mealOption: hostelItem.mealOption,
+      numberOfBeds: hostelItem.quantity,
+      numberOfNights: hostelItem.numberOfNights,
+      startDate: cart.hostelDates.checkIn,
+      endDate: cart.hostelDates.checkOut,
+      checkIn: cart.hostelDates.checkIn,
+      checkOut: cart.hostelDates.checkOut,
+      numberOfPeople: hostelItem.quantity,
+      priceDetails: {
+        basePrice: hostelSubtotal,
+        subtotal: hostelSubtotal,
+        taxes: hostelGst,
+        gst: hostelGst,
+        gstPercentage: 5,
+        discount: 0,
+        totalAmount: hostelTotalAmount,
+      },
+      hostelDetails: {
+        stayType: hostelItem.isWorkstation ? "workstation" : "hostel",
+        checkInTime: "1:00 PM",
+      },
+      guestDetails: guestDetails || {
+        name: req.user.name,
+        email: req.user.email,
+        phone: req.user.mobile || req.user.phone,
+      },
+      specialRequests: specialRequests || "",
+      paymentGroupId,
+      bookingStatus: "pending",
+      paymentStatus: "pending",
+      paymentDetails: {
+        totalAmount: hostelTotalAmount,
+        paidAmount: 0,
+        remainingAmount: hostelTotalAmount,
+        partialPaymentPercentage,
+        paymentHistory: [],
+      },
+    });
+
+    createdBookings.push({
+      bookingId: hostelBooking._id,
+      type: "hostel",
+      amount: hostelTotalAmount,
+      breakdown: {
+        basePrice: hostelSubtotal,
+        gst: hostelGst,
+        gstPercentage: 5,
+        discount: 0,
+        totalAmount: hostelTotalAmount,
+      },
+      dates: {
+        checkIn: cart.hostelDates.checkIn,
+        checkOut: cart.hostelDates.checkOut,
+        nights: hostelItem.numberOfNights || 1,
+      },
+      hostelDetails: {
+        hostelName: hostelItem.hostel.name,
+        location: hostelItem.hostel.location,
+        roomType: hostelItem.roomType,
+        mealOption: hostelItem.mealOption,
+        beds: hostelItem.quantity,
+        pricePerNight: hostelItem.pricePerNight,
+        isWorkstation: hostelItem.isWorkstation || false,
+      },
+    });
+
+    totalCartAmount += hostelTotalAmount;
+  }
+
+  // ===== CREATE RAZORPAY ORDER FOR TOTAL AMOUNT =====
+  const partialAmount = Math.round((totalCartAmount * partialPaymentPercentage) / 100);
+  // console.log("totalCartAmount * partialPaymentPercentage", totalCartAmount ,partialPaymentPercentage);
+  const remainingAmount = totalCartAmount - partialAmount;
+
+  // Import Razorpay (should already be imported in payment controller)
+  const Razorpay = (await import("razorpay")).default;
+  const razorpay = new Razorpay({
+    key_id: process.env.RAZORPAY_KEY_ID,
+    key_secret: process.env.RAZORPAY_KEY_SECRET,
+  });
+
+  const razorpayOrder = await razorpay.orders.create({
+    amount: partialAmount * 100, // Convert to paise
+    currency: "INR",
+    receipt: `${paymentGroupId.substring(0, 30)}`, // Max 40 chars
+    notes: {
+      paymentGroupId,
+      userId: req.user._id.toString(),
+      bookingIds: createdBookings.map((b) => b.bookingId.toString()).join(","),
+      partialPercentage: partialPaymentPercentage.toString(),
+    },
+  });
+
+  // ===== ADD PAYMENT HISTORY TO ALL BOOKINGS (WITH PROPORTIONAL AMOUNTS) =====
+  for (const bookingData of createdBookings) {
+    // Calculate proportional amount for this specific booking
+    const bookingProportion = bookingData.amount / totalCartAmount;
+    const bookingProportionalAmount = Math.round(partialAmount * bookingProportion);
+
+    await Booking.findByIdAndUpdate(bookingData.bookingId, {
+      $push: {
+        "paymentDetails.paymentHistory": {
+          paymentId: `PENDING_${razorpayOrder.id}`,
+          razorpayOrderId: razorpayOrder.id,
+          amount: bookingProportionalAmount, // Proportional amount for this booking
+          paymentType: partialPaymentPercentage === 100 ? "full" : "partial",
+          status: "pending",
+          createdAt: new Date(),
+        },
+      },
+    });
+  }
+
+  // ===== CLEAR CART =====
+  cart.bikeItems = [];
+  cart.hostelItems = [];
+  cart.bikeDates = {};
+  cart.hostelDates = {};
+  cart.pricing = {
+    bikeSubtotal: 0,
+    hostelSubtotal: 0,
+    subtotal: 0,
+    bulkDiscount: { amount: 0, percentage: 0 },
+    surgeMultiplier: 1,
+    extraCharges: 0,
+    gst: 0,
+    gstPercentage: 5,
+    total: 0,
+  };
+  cart.helmetDetails = { quantity: 0, charges: 0 };
+  await cart.save();
+
+  // ===== RETURN RESPONSE =====
+  res.status(201).json({
+    success: true,
+    data: {
+      bookings: createdBookings,
+      paymentGroupId,
+      totalAmount: totalCartAmount,
+      partialAmount,
+      partialPercentage: partialPaymentPercentage,
+      remainingAmount,
+      razorpay: {
+        orderId: razorpayOrder.id,
+        keyId: process.env.RAZORPAY_KEY_ID,
+        amount: partialAmount,
+        currency: "INR",
+      },
+    },
+    message: `${createdBookings.length} booking(s) created successfully. Please complete the payment.`,
+  });
+});
+
+// @desc    Get all bookings (grouped by payment group)
 // @route   GET /api/bookings
 // @access  Private
 export const getBookings = asyncHandler(async (req, res) => {
-  const { type, status, limit = 10, page = 1, sort } = req.query;
+  const { type, status, limit = 10, page = 1, sort, grouped = 'true' } = req.query;
 
   // Build query
   const query = { user: req.user._id };
@@ -593,9 +1009,6 @@ export const getBookings = asyncHandler(async (req, res) => {
     query.bookingStatus = status;
   }
 
-  // Count total documents
-  const total = await Booking.countDocuments(query);
-
   // Build sort options
   let sortOptions = {};
   if (sort) {
@@ -609,11 +1022,8 @@ export const getBookings = asyncHandler(async (req, res) => {
     sortOptions = { createdAt: -1 };
   }
 
-  // Pagination
-  const skip = (Number.parseInt(page) - 1) * Number.parseInt(limit);
-
-  // Execute query
-  const bookings = await Booking.find(query)
+  // Fetch all bookings (for grouping logic)
+  const allBookings = await Booking.find(query)
     .populate({
       path: "bike",
       select: "title brand model images",
@@ -623,20 +1033,200 @@ export const getBookings = asyncHandler(async (req, res) => {
       select: "title brand model images",
     })
     .populate({
-      path: "hotel",
-      select: "name location images",
+      path: "hostel",
+      select: "name location images ratings",
     })
-    .sort(sortOptions)
-    .skip(skip)
-    .limit(Number.parseInt(limit));
+    .sort(sortOptions);
+
+  let groupedData = [];
+  
+  if (grouped === 'true') {
+    // Group bookings by paymentGroupId
+    const bookingMap = new Map();
+    const singleBookings = [];
+
+    allBookings.forEach((booking) => {
+      if (booking.paymentGroupId) {
+        // Group by paymentGroupId
+        if (!bookingMap.has(booking.paymentGroupId)) {
+          bookingMap.set(booking.paymentGroupId, []);
+        }
+        bookingMap.get(booking.paymentGroupId).push(booking);
+      } else {
+        // No payment group - standalone booking
+        singleBookings.push(booking);
+      }
+    });
+
+    // Convert grouped bookings to array
+    bookingMap.forEach((bookings, paymentGroupId) => {
+      if (bookings.length > 1) {
+        // Combined booking (multiple items)
+        const combinedTotal = bookings.reduce(
+          (sum, b) => sum + (b.priceDetails?.totalAmount || 0),
+          0
+        );
+        const combinedPaid = bookings.reduce(
+          (sum, b) => sum + (b.paymentDetails?.paidAmount || 0),
+          0
+        );
+        const combinedRemaining = bookings.reduce(
+          (sum, b) => sum + (b.paymentDetails?.remainingAmount || 0),
+          0
+        );
+
+        groupedData.push({
+          isCombined: true,
+          paymentGroupId: paymentGroupId,
+          bookingType: "combined",
+          bookings: bookings.map((b) => b.toObject()),
+          combinedDetails: {
+            totalAmount: combinedTotal,
+            paidAmount: combinedPaid,
+            remainingAmount: combinedRemaining,
+            bookingCount: bookings.length,
+            types: [...new Set(bookings.map((b) => b.bookingType))],
+          },
+          paymentStatus: bookings.every((b) => b.paymentStatus === "completed")
+            ? "completed"
+            : bookings.some((b) => b.paymentStatus === "partial")
+            ? "partial"
+            : "pending",
+          bookingStatus: bookings.every((b) => b.bookingStatus === "confirmed")
+            ? "confirmed"
+            : bookings.some((b) => b.bookingStatus === "cancelled")
+            ? "cancelled"
+            : "pending",
+          createdAt: bookings[0].createdAt,
+          startDate: bookings[0].startDate || bookings[0].checkIn,
+          endDate: bookings[bookings.length - 1].endDate || bookings[bookings.length - 1].checkOut,
+        });
+      } else {
+        // Single booking with payment group (shouldn't happen, but handle it)
+        singleBookings.push(bookings[0]);
+      }
+    });
+
+    // Add single bookings
+    singleBookings.forEach((booking) => {
+      groupedData.push({
+        isCombined: false,
+        ...booking.toObject(),
+      });
+    });
+
+    // Sort grouped data by creation date
+    groupedData.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  } else {
+    // Return ungrouped (legacy behavior)
+    groupedData = allBookings.map((b) => ({
+      isCombined: false,
+      ...b.toObject(),
+    }));
+  }
+
+  // Apply pagination to grouped data
+  const total = groupedData.length;
+  const skip = (Number.parseInt(page) - 1) * Number.parseInt(limit);
+  const paginatedData = groupedData.slice(skip, skip + Number.parseInt(limit));
 
   res.status(200).json({
     success: true,
-    count: bookings.length,
+    count: paginatedData.length,
     total,
     page: Number.parseInt(page),
     pages: Math.ceil(total / Number.parseInt(limit)),
-    data: bookings,
+    data: paginatedData,
+  });
+});
+
+// @desc    Get bookings by payment group ID
+// @route   GET /api/bookings/group/:paymentGroupId
+// @access  Private
+export const getBookingsByPaymentGroup = asyncHandler(async (req, res) => {
+  const { paymentGroupId } = req.params;
+
+  const bookings = await Booking.find({ paymentGroupId })
+    .populate({
+      path: "bike",
+      select: "title brand model images pricePerDay registrationNumber",
+    })
+    .populate({
+      path: "bikeItems.bike",
+      select: "title brand model images pricePerDay registrationNumber",
+    })
+    .populate({
+      path: "hostel",
+      select: "name location images rooms ratings",
+    })
+    .populate({
+      path: "user",
+      select: "name email mobile",
+    });
+
+  if (bookings.length === 0) {
+    throw new ApiError("No bookings found for this payment group", 404);
+  }
+
+  // Check authorization - at least one booking should belong to user
+  const userBooking = bookings.find(
+    (booking) => booking.user._id.toString() === req.user._id.toString()
+  );
+
+  if (!userBooking && req.user.role !== "admin") {
+    throw new ApiError("Not authorized to access these bookings", 401);
+  }
+
+  // Calculate combined totals
+  const combinedTotals = {
+    totalAmount: bookings.reduce((sum, b) => sum + (b.priceDetails?.totalAmount || 0), 0),
+    paidAmount: bookings[0]?.paymentDetails?.paidAmount || 0,
+    remainingAmount: bookings[0]?.paymentDetails?.remainingAmount || 0,
+    partialPaymentPercentage: bookings[0]?.paymentDetails?.partialPaymentPercentage || 25,
+  };
+
+  // Enhanced bookings with computed details
+  const enhancedBookings = bookings.map((booking) => {
+    const enhanced = booking.toObject();
+    
+    if (booking.bookingType === "bike") {
+      const startDateTime = new Date(
+        `${booking.startDate.toISOString().split("T")[0]}T${booking.startTime}`
+      );
+      const endDateTime = new Date(
+        `${booking.endDate.toISOString().split("T")[0]}T${booking.endTime}`
+      );
+      const durationInHours = (endDateTime - startDateTime) / (1000 * 60 * 60);
+      
+      enhanced.computedDetails = {
+        durationInHours: Math.round(durationInHours * 100) / 100,
+        durationInDays: Math.ceil(durationInHours / 24),
+      };
+    } else if (booking.bookingType === "hostel") {
+      const checkIn = new Date(booking.checkIn || booking.startDate);
+      const checkOut = new Date(booking.checkOut || booking.endDate);
+      const nights = Math.ceil((checkOut - checkIn) / (1000 * 60 * 60 * 24));
+      
+      enhanced.computedDetails = {
+        nights: nights,
+        checkInDate: checkIn,
+        checkOutDate: checkOut,
+      };
+    }
+    
+    return enhanced;
+  });
+
+  res.status(200).json({
+    success: true,
+    data: {
+      paymentGroupId,
+      bookings: enhancedBookings,
+      combinedTotals,
+      bookingCount: bookings.length,
+      allConfirmed: bookings.every((b) => b.bookingStatus === "confirmed"),
+      paymentCompleted: bookings.every((b) => b.paymentStatus === "completed"),
+    },
   });
 });
 
@@ -647,30 +1237,19 @@ export const getBooking = asyncHandler(async (req, res) => {
   const booking = await Booking.findById(req.params.id)
     .populate({
       path: "bike",
-      select:
-        "title brand model year images pricePerDay additionalKmPrice registrationNumber location features requiredDocuments termsAndConditions ratings numReviews quantity availableQuantity status isTrending specialPricing bulkDiscounts",
+      select: "title brand model images location registrationNumber",
     })
     .populate({
       path: "bikeItems.bike",
-      select:
-        "title brand model year images pricePerDay additionalKmPrice registrationNumber location features requiredDocuments termsAndConditions ratings numReviews quantity availableQuantity status isTrending specialPricing bulkDiscounts",
+      select: "title brand model images location registrationNumber",
     })
     .populate({
-      path: "hotel",
-      select:
-        "name description location images rooms amenities policies ratings numReviews checkInTime checkOutTime address contactInfo",
+      path: "hostel",
+      select: "name location images ratings checkInTime checkOutTime address contactInfo",
     })
     .populate({
       path: "user",
-      select: "name email mobile profilePicture",
-    })
-    .populate({
-      path: "assignedEmployee",
-      select: "name email mobile role department",
-    })
-    .populate({
-      path: "completedBy",
-      select: "name email mobile role",
+      select: "name email mobile",
     });
 
   if (!booking) {
@@ -680,137 +1259,286 @@ export const getBooking = asyncHandler(async (req, res) => {
   // Check if booking belongs to user
   if (
     booking.user._id.toString() !== req.user._id.toString() &&
-    req.user.role !== "admin"
+    req.user.role !== "admin" &&
+    req.user.role !== "employee"
   ) {
     throw new ApiError("Not authorized to access this booking", 401);
   }
 
-  // Add computed fields for better frontend usage
-  const enhancedBooking = booking.toObject();
+  // Check if this is part of a combined booking and calculate correct payment amounts
+  let paymentInfo;
+  let combinedInfo = null;
+  
+  if (booking.paymentGroupId) {
+    const relatedBookings = await Booking.find({
+      paymentGroupId: booking.paymentGroupId,
+      _id: { $ne: booking._id },
+    }).select("_id bookingType priceDetails paymentDetails");
 
-  // For bike bookings, add useful computed information
-  if (booking.bookingType === "bike") {
-    // Calculate rental duration in hours and days
-    const startDateTime = new Date(
-      `${booking.startDate.toISOString().split("T")[0]}T${booking.startTime}`
-    );
-    const endDateTime = new Date(
-      `${booking.endDate.toISOString().split("T")[0]}T${booking.endTime}`
-    );
-    const durationInHours = (endDateTime - startDateTime) / (1000 * 60 * 60);
-    const durationInDays = Math.ceil(durationInHours / 24);
-
-    enhancedBooking.computedDetails = {
-      durationInHours: Math.round(durationInHours * 100) / 100,
-      durationInDays,
-      isOverdue:
-        booking.bookingStatus === "confirmed" && new Date() > endDateTime,
-      canExtend:
-        booking.bookingStatus === "confirmed" && new Date() < endDateTime,
-      canCancel:
-        booking.bookingStatus === "pending" ||
-        (booking.bookingStatus === "confirmed" && new Date() < startDateTime),
-    };
-
-    // Add bike-specific details for multiple bikes
-    if (booking.bikeItems && booking.bikeItems.length > 0) {
-      enhancedBooking.totalBikes = booking.bikeItems.reduce(
-        (sum, item) => sum + item.quantity,
+    if (relatedBookings.length > 0) {
+      // This is a COMBINED booking
+      const allBookings = [booking, ...relatedBookings];
+      
+      // Calculate combined total
+      const combinedTotal = allBookings.reduce(
+        (sum, b) => sum + (b.priceDetails?.totalAmount || 0),
         0
       );
-      enhancedBooking.bikeTypes = booking.bikeItems.length;
-      enhancedBooking.bikeItemsWithDetails = booking.bikeItems.map((item) => ({
-        ...item.toObject(),
-        bike: item.bike
-          ? {
-              ...item.bike.toObject(),
-              currentAvailability: item.bike.availableQuantity,
-              isHighDemand: item.bike.availableQuantity < 3,
-              hasSpecialPricing:
-                item.bike.specialPricing && item.bike.specialPricing.length > 0,
-            }
-          : null,
-      }));
-    }
 
-    // Add single bike details if applicable
-    if (booking.bike) {
-      enhancedBooking.bike = {
-        ...booking.bike.toObject(),
-        currentAvailability: booking.bike.availableQuantity,
-        isHighDemand: booking.bike.availableQuantity < 3,
-        hasSpecialPricing:
-          booking.bike.specialPricing && booking.bike.specialPricing.length > 0,
+      // Get ACTUAL paid amount from payment history (not from DB paidAmount field)
+      // Find completed payments and sum their amounts (they should already be proportional)
+      let actualPaidAmount = 0;
+      const paymentHistory = booking.paymentDetails?.paymentHistory || [];
+      
+      for (const payment of paymentHistory) {
+        if (payment.status === "completed") {
+          actualPaidAmount += payment.amount || 0;
+        }
+      }
+
+      const combinedRemaining = combinedTotal - actualPaidAmount;
+
+      // Calculate proportional payment for THIS booking
+      const thisBookingTotal = booking.priceDetails.totalAmount;
+      const proportion = thisBookingTotal / combinedTotal;
+      const proportionalPaid = Math.round(actualPaidAmount * proportion);
+      const proportionalRemaining = thisBookingTotal - proportionalPaid;
+
+      paymentInfo = {
+        total: combinedTotal,
+        paid: actualPaidAmount,
+        remaining: combinedRemaining,
+        percentage: booking.paymentDetails.partialPaymentPercentage || 25,
+        method: booking.paymentId ? "online" : "pending",
+        breakdown: {
+          thisBooking: {
+            total: thisBookingTotal,
+            paid: proportionalPaid,
+            remaining: proportionalRemaining,
+          },
+          otherBookings: relatedBookings.map((b) => ({
+            id: b._id,
+            type: b.bookingType,
+            total: b.priceDetails?.totalAmount || 0,
+            paid: Math.round(actualPaidAmount * ((b.priceDetails?.totalAmount || 0) / combinedTotal)),
+          })),
+        },
+      };
+
+      combinedInfo = {
+        isCombined: true,
+        paymentGroupId: booking.paymentGroupId,
+        totalBookings: allBookings.length,
+        otherBookings: relatedBookings.map((b) => ({
+          id: b._id,
+          type: b.bookingType,
+          amount: b.priceDetails?.totalAmount || 0,
+        })),
+      };
+    } else {
+      // Has paymentGroupId but no other bookings (shouldn't happen)
+      paymentInfo = {
+        total: booking.priceDetails.totalAmount,
+        paid: booking.paymentDetails.paidAmount,
+        remaining: booking.paymentDetails.remainingAmount,
+        percentage: booking.paymentDetails.partialPaymentPercentage || 25,
+        method: booking.paymentId ? "online" : "pending",
       };
     }
-  }
-
-  // For hotel bookings, add useful computed information
-  if (booking.bookingType === "hotel") {
-    const checkInDate = new Date(booking.startDate);
-    const checkOutDate = new Date(booking.endDate);
-    const nightsStayed = Math.ceil(
-      (checkOutDate - checkInDate) / (1000 * 60 * 60 * 24)
-    );
-
-    enhancedBooking.computedDetails = {
-      nightsStayed,
-      canCancel:
-        booking.bookingStatus === "pending" ||
-        (booking.bookingStatus === "confirmed" && new Date() < checkInDate),
-      canModify:
-        booking.bookingStatus === "confirmed" && new Date() < checkInDate,
+  } else {
+    // Single booking (no group)
+    paymentInfo = {
+      total: booking.priceDetails.totalAmount,
+      paid: booking.paymentDetails.paidAmount,
+      remaining: booking.paymentDetails.remainingAmount,
+      percentage: booking.paymentDetails.partialPaymentPercentage || 25,
+      method: booking.paymentId ? "online" : "pending",
     };
-
-    // Calculate total rooms booked
-    if (booking.hotelDetails && booking.hotelDetails.roomOptions) {
-      const roomOptions = booking.hotelDetails.roomOptions;
-      enhancedBooking.totalRooms =
-        (roomOptions.bedOnly?.quantity || 0) +
-        (roomOptions.bedAndBreakfast?.quantity || 0) +
-        (roomOptions.bedBreakfastAndDinner?.quantity || 0);
-    }
   }
 
-  // Add payment and status information
-  enhancedBooking.statusInfo = {
-    canMakePayment:
-      booking.paymentStatus === "pending" &&
-      booking.bookingStatus === "pending",
-    isPaymentCompleted: booking.paymentStatus === "completed",
-    isBookingActive: booking.bookingStatus === "confirmed",
-    isBookingCompleted: booking.bookingStatus === "completed",
-    isCancellable:
-      booking.bookingStatus === "pending" ||
-      booking.bookingStatus === "confirmed",
-  };
+  // If this is a COMBINED booking, fetch ALL bookings in the group
+  let allGroupBookings = [];
+  if (booking.paymentGroupId) {
+    allGroupBookings = await Booking.find({
+      paymentGroupId: booking.paymentGroupId,
+    })
+      .populate("bike")
+      .populate("bikeItems.bike")
+      .populate("hostel")
+      .sort({ bookingType: 1 }); // bike first, then hostel
+  }
 
-  // Add formatted dates for frontend display
-  enhancedBooking.formattedDates = {
-    startDate: booking.startDate.toLocaleDateString("en-IN", {
-      weekday: "short",
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    }),
-    endDate: booking.endDate.toLocaleDateString("en-IN", {
-      weekday: "short",
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    }),
-    createdAt: booking.createdAt.toLocaleDateString("en-IN", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    }),
+  // Build clean response
+  const response = {
+    // Basic Info
+    paymentGroupId: booking.paymentGroupId,
+    isCombined: booking.paymentGroupId && allGroupBookings.length > 1,
+    status: booking.bookingStatus,
+    paymentStatus: booking.paymentStatus,
+    bookedOn: booking.createdAt,
+    
+    // Combined Payment Summary
+    paymentSummary: {
+      totalAmount: paymentInfo.total,
+      paidAmount: paymentInfo.paid,
+      remainingAmount: paymentInfo.remaining,
+      partialPercentage: paymentInfo.percentage,
+      partialAmount: Math.round((paymentInfo.total * paymentInfo.percentage) / 100),
+      paymentMethod: paymentInfo.method,
+    },
+
+    // All Bookings (bikes and hostels)
+    bookings: allGroupBookings.length > 0 ? allGroupBookings.map((b) => {
+      const bookingData = {
+        id: b._id,
+        type: b.bookingType,
+        
+        // Price Breakdown
+        priceBreakdown: {
+          basePrice: b.priceDetails.basePrice || b.priceDetails.subtotal,
+          ...(b.priceDetails.helmetCharges && { helmetCharges: b.priceDetails.helmetCharges }),
+          ...(b.priceDetails.discount && { discount: b.priceDetails.discount }),
+          gst: b.priceDetails.gst || b.priceDetails.taxes,
+          gstPercentage: b.priceDetails.gstPercentage || 5,
+          totalAmount: b.priceDetails.totalAmount,
+        },
+      };
+
+      // Add bike-specific details
+      if (b.bookingType === "bike") {
+        bookingData.bike = {
+          items: b.bikeItems.map((item) => ({
+            id: item.bike._id,
+            name: item.bike.title,
+            brand: item.bike.brand,
+            model: item.bike.model,
+            images: item.bike.images,
+            quantity: item.quantity,
+            kmOption: item.kmOption,
+            pricePerUnit: item.pricePerUnit,
+            totalPrice: item.totalPrice,
+          })),
+          helmets: b.helmetQuantity || 0,
+        };
+        bookingData.dates = {
+          pickupDate: b.startDate,
+          dropDate: b.endDate,
+          pickupTime: b.startTime,
+          dropTime: b.endTime,
+          totalDays: b.bikeDetails?.totalDays || 1,
+        };
+      }
+
+      // Add hostel-specific details
+      if (b.bookingType === "hostel" && b.hostel) {
+        bookingData.hostel = {
+          id: b.hostel._id,
+          name: b.hostel.name,
+          location: b.hostel.location,
+          images: b.hostel.images,
+          rating: b.hostel.ratings,
+          checkInTime: b.hostel.checkInTime,
+          checkOutTime: b.hostel.checkOutTime,
+          address: b.hostel.address,
+          contact: b.hostel.contactInfo,
+          roomType: b.roomType,
+          mealOption: b.mealOption,
+          beds: b.numberOfBeds,
+          nights: b.numberOfNights,
+          pricePerNight: (b.priceDetails.basePrice || b.priceDetails.subtotal) / (b.numberOfNights || 1),
+          isWorkstation: b.hostelDetails?.stayType === "workstation",
+        };
+        bookingData.dates = {
+          checkIn: b.checkIn || b.startDate,
+          checkOut: b.checkOut || b.endDate,
+          nights: b.numberOfNights || 1,
+        };
+      }
+
+      return bookingData;
+    }) : [
+      // Single booking (no group)
+      {
+        id: booking._id,
+        type: booking.bookingType,
+        priceBreakdown: {
+          basePrice: booking.priceDetails.basePrice || booking.priceDetails.subtotal,
+          ...(booking.priceDetails.helmetCharges && { helmetCharges: booking.priceDetails.helmetCharges }),
+          ...(booking.priceDetails.discount && { discount: booking.priceDetails.discount }),
+          gst: booking.priceDetails.gst || booking.priceDetails.taxes,
+          gstPercentage: booking.priceDetails.gstPercentage || 5,
+          totalAmount: booking.priceDetails.totalAmount,
+        },
+        ...(booking.bookingType === "bike" && {
+          bike: {
+            items: booking.bikeItems.map((item) => ({
+              id: item.bike._id,
+              name: item.bike.title,
+              brand: item.bike.brand,
+              model: item.bike.model,
+              images: item.bike.images,
+              quantity: item.quantity,
+              kmOption: item.kmOption,
+              pricePerUnit: item.pricePerUnit,
+              totalPrice: item.totalPrice,
+            })),
+            helmets: booking.helmetQuantity || 0,
+          },
+          dates: {
+            pickupDate: booking.startDate,
+            dropDate: booking.endDate,
+            pickupTime: booking.startTime,
+            dropTime: booking.endTime,
+            totalDays: booking.bikeDetails?.totalDays || 1,
+          },
+        }),
+        ...(booking.bookingType === "hostel" && {
+          hostel: {
+            id: booking.hostel._id,
+            name: booking.hostel.name,
+            location: booking.hostel.location,
+            images: booking.hostel.images,
+            rating: booking.hostel.ratings,
+            checkInTime: booking.hostel.checkInTime,
+            checkOutTime: booking.hostel.checkOutTime,
+            address: booking.hostel.address,
+            contact: booking.hostel.contactInfo,
+            roomType: booking.roomType,
+            mealOption: booking.mealOption,
+            beds: booking.numberOfBeds,
+            nights: booking.numberOfNights,
+            pricePerNight: (booking.priceDetails.basePrice || booking.priceDetails.subtotal) / (booking.numberOfNights || 1),
+            isWorkstation: booking.hostelDetails?.stayType === "workstation",
+          },
+          dates: {
+            checkIn: booking.checkIn || booking.startDate,
+            checkOut: booking.checkOut || booking.endDate,
+            nights: booking.numberOfNights || 1,
+          },
+        }),
+      }
+    ],
+
+    // Guest Info
+    guest: {
+      name: booking.guestDetails?.name || booking.user.name,
+      email: booking.guestDetails?.email || booking.user.email,
+      phone: booking.guestDetails?.phone || booking.user.mobile,
+    },
+
+    // Actions
+    actions: {
+      canPay: booking.paymentStatus !== "completed" && booking.bookingStatus !== "cancelled",
+      canCancel: booking.bookingStatus === "pending" || booking.bookingStatus === "confirmed",
+    },
+
+    // Special Requests
+    ...(booking.specialRequests && { notes: booking.specialRequests }),
   };
 
   res.status(200).json({
     success: true,
-    data: enhancedBooking,
+    data: response,
   });
 });
 
@@ -978,16 +1706,16 @@ export const calculateAdditionalCharges = asyncHandler(async (req, res) => {
   });
 });
 
-// @desc    Get hotel bookings
-// @route   GET /api/bookings/hotels
+// @desc    Get hostel bookings
+// @route   GET /api/bookings/hostels
 // @access  Private
-export const getHotelBookings = asyncHandler(async (req, res) => {
+export const getHostelBookings = asyncHandler(async (req, res) => {
   const { status, limit = 10, page = 1, sort } = req.query;
 
-  // Build query for hotel bookings
+  // Build query for hostel bookings
   const query = {
     user: req.user._id,
-    bookingType: "hotel",
+    bookingType: "hostel",
   };
 
   // Filter by status
@@ -1017,8 +1745,8 @@ export const getHotelBookings = asyncHandler(async (req, res) => {
   // Execute query
   const bookings = await Booking.find(query)
     .populate({
-      path: "hotel",
-      select: "name location images",
+      path: "hostel",
+      select: "name location images ratings rooms",
     })
     .sort(sortOptions)
     .skip(skip)
@@ -1090,11 +1818,11 @@ export const getBikeBookings = asyncHandler(async (req, res) => {
   });
 });
 
-// @desc    Update hotel booking details
-// @route   PUT /api/bookings/:id/hotel-details
+// @desc    Update hostel booking details
+// @route   PUT /api/bookings/:id/hostel-details
 // @access  Private
-export const updateHotelBookingDetails = asyncHandler(async (req, res) => {
-  const { checkInTime, specialRequests } = req.body;
+export const updateHostelBookingDetails = asyncHandler(async (req, res) => {
+  const { checkInTime, specialRequests, numberOfBeds, mealOption } = req.body;
 
   // Get booking
   const booking = await Booking.findById(req.params.id);
@@ -1111,18 +1839,35 @@ export const updateHotelBookingDetails = asyncHandler(async (req, res) => {
     throw new ApiError("Not authorized to update this booking", 401);
   }
 
-  // Check if booking is for hotel
-  if (booking.bookingType !== "hotel") {
-    throw new ApiError("This endpoint is only for hotel bookings", 400);
+  // Check if booking is for hostel
+  if (booking.bookingType !== "hostel") {
+    throw new ApiError("This endpoint is only for hostel bookings", 400);
   }
 
-  // Update hotel details
+  // Only allow updates if booking is pending
+  if (booking.bookingStatus !== "pending") {
+    throw new ApiError("Cannot update booking details after confirmation", 400);
+  }
+
+  // Update hostel details
   if (checkInTime) {
-    booking.hotelDetails.checkInTime = checkInTime;
+    if (!booking.hostelDetails) {
+      booking.hostelDetails = {};
+    }
+    booking.hostelDetails.checkInTime = checkInTime;
   }
 
   if (specialRequests) {
     booking.specialRequests = specialRequests;
+  }
+
+  if (numberOfBeds && numberOfBeds !== booking.numberOfBeds) {
+    // Validate bed availability if changing number of beds
+    booking.numberOfBeds = numberOfBeds;
+  }
+
+  if (mealOption && ["bedOnly", "bedAndBreakfast", "bedBreakfastAndDinner"].includes(mealOption)) {
+    booking.mealOption = mealOption;
   }
 
   await booking.save();
@@ -1141,8 +1886,8 @@ export const getBookingStats = asyncHandler(async (req, res) => {
   const totalBikeBookings = await Booking.countDocuments({
     bookingType: "bike",
   });
-  const totalHotelBookings = await Booking.countDocuments({
-    bookingType: "hotel",
+  const totalHostelBookings = await Booking.countDocuments({
+    bookingType: "hostel",
   });
 
   // Get counts by status
@@ -1176,17 +1921,17 @@ export const getBookingStats = asyncHandler(async (req, res) => {
   // Format revenue stats
   const bikeRevenue =
     revenueStats.find((item) => item._id === "bike")?.totalRevenue || 0;
-  const hotelRevenue =
-    revenueStats.find((item) => item._id === "hotel")?.totalRevenue || 0;
-  const totalRevenue = bikeRevenue + hotelRevenue;
+  const hostelRevenue =
+    revenueStats.find((item) => item._id === "hostel")?.totalRevenue || 0;
+  const totalRevenue = bikeRevenue + hostelRevenue;
 
   res.status(200).json({
     success: true,
     data: {
-      totalBookings: totalBikeBookings + totalHotelBookings,
+      totalBookings: totalBikeBookings + totalHostelBookings,
       byType: {
         bike: totalBikeBookings,
-        hotel: totalHotelBookings,
+        hostel: totalHostelBookings,
       },
       byStatus: {
         pending: pendingBookings,
@@ -1197,7 +1942,7 @@ export const getBookingStats = asyncHandler(async (req, res) => {
       revenue: {
         total: totalRevenue,
         bike: bikeRevenue,
-        hotel: hotelRevenue,
+        hostel: hostelRevenue,
       },
     },
   });
@@ -1570,8 +2315,8 @@ export const getEmployeeBookings = asyncHandler(async (req, res) => {
       select: "title brand model images",
     })
     .populate({
-      path: "hotel",
-      select: "name location images",
+      path: "hostel",
+      select: "name location images ratings",
     })
     .populate({
       path: "user",
@@ -1594,15 +2339,15 @@ export const getEmployeeBookings = asyncHandler(async (req, res) => {
       paymentStatus:
         booking.paymentStatus.charAt(0).toUpperCase() +
         booking.paymentStatus.slice(1),
-      startDate: booking.startDate,
-      endDate: booking.endDate,
+      startDate: booking.startDate || booking.checkIn,
+      endDate: booking.endDate || booking.checkOut,
       createdAt: booking.createdAt,
       totalAmount: booking.priceDetails.totalAmount,
       customerName: booking.user?.name || "Unknown User",
       itemName:
         booking.bookingType === "bike"
           ? booking.bike?.title || "Bike"
-          : booking.hotel?.name || "Hotel",
+          : booking.hostel?.name || "Hostel",
     };
   });
 
@@ -1627,8 +2372,8 @@ export const getEmployeeBooking = asyncHandler(async (req, res) => {
         "title brand model images pricePerDay additionalKmPrice registrationNumber",
     })
     .populate({
-      path: "hotel",
-      select: "name location images rooms",
+      path: "hostel",
+      select: "name location images rooms ratings checkInTime checkOutTime",
     })
     .populate({
       path: "user",
