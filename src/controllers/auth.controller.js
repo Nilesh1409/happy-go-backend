@@ -322,7 +322,40 @@ export const verifyMobileOTP = asyncHandler(async (req, res) => {
     });
   }
 
-  // If not an employee, check in User model with exact OTP match
+  // Check if this mobile belongs to an admin user - if yes, bypass OTP check
+  const adminUser = await User.findOne({
+    mobile,
+    role: "admin",
+    mobileVerificationExpire: { $gt: Date.now() },
+  });
+
+  console.log("🚀 ~ verifyMobileOTP ~ admin user found:", !!adminUser);
+
+  if (adminUser) {
+    // Clear OTP fields for admin
+    adminUser.mobileVerificationOTP = undefined;
+    adminUser.mobileVerificationExpire = undefined;
+    adminUser.isMobileVerified = true;
+    await adminUser.save();
+
+    const token = generateToken(adminUser._id);
+
+    return res.status(200).json({
+      success: true,
+      message: "Admin mobile verified successfully (OTP bypassed)",
+      token,
+      userType: "admin",
+      data: {
+        _id: adminUser._id,
+        name: adminUser.name,
+        email: adminUser.email,
+        mobile: adminUser.mobile,
+        role: adminUser.role,
+      },
+    });
+  }
+
+  // If not an employee or admin, check in User model with exact OTP match
   const user = await User.findOne({
     mobile,
     mobileVerificationOTP: otp,
