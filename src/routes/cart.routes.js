@@ -9,6 +9,7 @@ import {
   addHostelToCart,
   getCartDetails,
   removeHostelFromCart,
+  updateHostelCartQuantity,
 } from "../controllers/cart.controller.js"
 import { protect } from "../middleware/auth.middleware.js"
 
@@ -29,6 +30,7 @@ router.put("/helmets", updateHelmetQuantity)
 
 // Hostel cart routes
 router.post("/hostels", addHostelToCart)
+router.put("/hostels/:itemId", updateHostelCartQuantity)
 router.delete("/hostels/:itemId", removeHostelFromCart)
 
 // Clear cart

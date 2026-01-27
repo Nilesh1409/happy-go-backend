@@ -131,7 +131,7 @@ const hostelSchema = new mongoose.Schema(
     houseRules: [String],
     ratings: {
       type: Number,
-      min: [1, "Rating must be at least 1"],
+      min: [0, "Rating cannot be negative"],
       max: [5, "Rating cannot be more than 5"],
       default: 0,
     },
