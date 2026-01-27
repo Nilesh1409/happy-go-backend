@@ -554,14 +554,15 @@ export const createBooking = asyncHandler(async (req, res) => {
     }
 
     // Check if enough beds are available
+    // Use strict inequality to allow same-day check-out/check-in
     const existingBookings = await Booking.find({
       bookingType: "hostel",
       hostel: hostelId,
       roomType,
       $or: [
         {
-          startDate: { $lte: new Date(endDate) },
-          endDate: { $gte: new Date(startDate) },
+          startDate: { $lt: new Date(endDate) },    // Existing starts before new check-out
+          endDate: { $gt: new Date(startDate) },    // Existing ends after new check-in
         },
       ],
       bookingStatus: { $nin: ["cancelled"] },
@@ -623,6 +624,8 @@ export const createBooking = asyncHandler(async (req, res) => {
         paymentHistory: []
       }
     });
+
+    // No need to update availableBeds - it's calculated dynamically on fetch
 
     // Clear hostel items from cart after booking creation
     const cart = await Cart.findOne({ user: req.user._id, isActive: true });
@@ -822,88 +825,90 @@ export const createCartBooking = asyncHandler(async (req, res) => {
     totalCartAmount += bikeTotalAmount;
   }
 
-  // ===== CREATE HOSTEL BOOKING IF CART HAS HOSTELS =====
+  // ===== CREATE HOSTEL BOOKINGS IF CART HAS HOSTELS =====
+  // Support multiple hostel items (different meal options, room types, etc.)
   if (cart.hostelItems.length > 0) {
-    // For now, support single hostel item (can be extended for multiple)
-    const hostelItem = cart.hostelItems[0];
+    for (const hostelItem of cart.hostelItems) {
+      // Calculate pricing for this specific hostel item
+      const itemSubtotal = hostelItem.totalPrice;
+      const itemGst = Math.round((itemSubtotal * 5) / 100);
+      const itemTotalAmount = itemSubtotal + itemGst;
 
-    // Calculate hostel pricing with GST
-    const hostelSubtotal = cart.pricing.hostelSubtotal || 0;
-    const hostelGst = Math.round((hostelSubtotal * 5) / 100);
-    const hostelTotalAmount = hostelSubtotal + hostelGst;
-
-    const hostelBooking = await Booking.create({
-      user: req.user._id,
-      bookingType: "hostel",
-      hostel: hostelItem.hostel._id,
-      roomType: hostelItem.roomType,
-      mealOption: hostelItem.mealOption,
-      numberOfBeds: hostelItem.quantity,
-      numberOfNights: hostelItem.numberOfNights,
-      startDate: cart.hostelDates.checkIn,
-      endDate: cart.hostelDates.checkOut,
-      checkIn: cart.hostelDates.checkIn,
-      checkOut: cart.hostelDates.checkOut,
-      numberOfPeople: hostelItem.quantity,
-      priceDetails: {
-        basePrice: hostelSubtotal,
-        subtotal: hostelSubtotal,
-        taxes: hostelGst,
-        gst: hostelGst,
-        gstPercentage: 5,
-        discount: 0,
-        totalAmount: hostelTotalAmount,
-      },
-      hostelDetails: {
-        stayType: hostelItem.isWorkstation ? "workstation" : "hostel",
-        checkInTime: "1:00 PM",
-      },
-      guestDetails: guestDetails || {
-        name: req.user.name,
-        email: req.user.email,
-        phone: req.user.mobile || req.user.phone,
-      },
-      specialRequests: specialRequests || "",
-      paymentGroupId,
-      bookingStatus: "pending",
-      paymentStatus: "pending",
-      paymentDetails: {
-        totalAmount: hostelTotalAmount,
-        paidAmount: 0,
-        remainingAmount: hostelTotalAmount,
-        partialPaymentPercentage,
-        paymentHistory: [],
-      },
-    });
-
-    createdBookings.push({
-      bookingId: hostelBooking._id,
-      type: "hostel",
-      amount: hostelTotalAmount,
-      breakdown: {
-        basePrice: hostelSubtotal,
-        gst: hostelGst,
-        gstPercentage: 5,
-        discount: 0,
-        totalAmount: hostelTotalAmount,
-      },
-      dates: {
-        checkIn: cart.hostelDates.checkIn,
-        checkOut: cart.hostelDates.checkOut,
-        nights: hostelItem.numberOfNights || 1,
-      },
-      hostelDetails: {
-        hostelName: hostelItem.hostel.name,
-        location: hostelItem.hostel.location,
+      const hostelBooking = await Booking.create({
+        user: req.user._id,
+        bookingType: "hostel",
+        hostel: hostelItem.hostel._id,
         roomType: hostelItem.roomType,
         mealOption: hostelItem.mealOption,
-        beds: hostelItem.quantity,
-        pricePerNight: hostelItem.pricePerNight,
-        isWorkstation: hostelItem.isWorkstation || false,
-      },
-    });
+        numberOfBeds: hostelItem.quantity,
+        numberOfNights: hostelItem.numberOfNights,
+        startDate: cart.hostelDates.checkIn,
+        endDate: cart.hostelDates.checkOut,
+        checkIn: cart.hostelDates.checkIn,
+        checkOut: cart.hostelDates.checkOut,
+        numberOfPeople: hostelItem.quantity,
+        priceDetails: {
+          basePrice: itemSubtotal,
+          subtotal: itemSubtotal,
+          taxes: itemGst,
+          gst: itemGst,
+          gstPercentage: 5,
+          discount: 0,
+          totalAmount: itemTotalAmount,
+        },
+        hostelDetails: {
+          stayType: hostelItem.isWorkstation ? "workstation" : "hostel",
+          checkInTime: "1:00 PM",
+        },
+        guestDetails: guestDetails || {
+          name: req.user.name,
+          email: req.user.email,
+          phone: req.user.mobile || req.user.phone,
+        },
+        specialRequests: specialRequests || "",
+        paymentGroupId,
+        bookingStatus: "pending",
+        paymentStatus: "pending",
+        paymentDetails: {
+          totalAmount: itemTotalAmount,
+          paidAmount: 0,
+          remainingAmount: itemTotalAmount,
+          partialPaymentPercentage,
+          paymentHistory: [],
+        },
+      });
 
-    totalCartAmount += hostelTotalAmount;
+      // No need to update availableBeds - it's calculated dynamically on fetch
+
+      createdBookings.push({
+        bookingId: hostelBooking._id,
+        type: "hostel",
+        amount: itemTotalAmount,
+        breakdown: {
+          basePrice: itemSubtotal,
+          gst: itemGst,
+          gstPercentage: 5,
+          discount: 0,
+          totalAmount: itemTotalAmount,
+        },
+        dates: {
+          checkIn: cart.hostelDates.checkIn,
+          checkOut: cart.hostelDates.checkOut,
+          nights: hostelItem.numberOfNights || 1,
+        },
+        hostelDetails: {
+          hostelName: hostelItem.hostel.name,
+          location: hostelItem.hostel.location,
+          roomType: hostelItem.roomType,
+          mealOption: hostelItem.mealOption,
+          beds: hostelItem.quantity,
+          pricePerNight: hostelItem.pricePerNight,
+          isWorkstation: hostelItem.isWorkstation || false,
+        },
+      });
+
+      totalCartAmount += itemTotalAmount;
+    }
   }
 
   // ===== CREATE RAZORPAY ORDER FOR TOTAL AMOUNT =====
@@ -2600,6 +2605,9 @@ export const cancelBooking = asyncHandler(async (req, res) => {
   });
 
   await booking.save();
+
+  // No need to restore availability - it's calculated dynamically based on active bookings
+  // Cancelled bookings are excluded from availability calculations
 
   return res.status(200).json({
     success: true,
