@@ -1324,6 +1324,86 @@ export const removeHostelFromCart = asyncHandler(async (req, res) => {
   });
 });
 
+// @desc    Update hostel cart item quantity
+// @route   PUT /api/cart/hostels/:itemId
+// @access  Private
+export const updateHostelCartQuantity = asyncHandler(async (req, res) => {
+  const { itemId } = req.params;
+  const { quantity } = req.body;
+
+  // Validate quantity
+  if (!quantity || quantity < 1) {
+    throw new ApiError("Quantity must be at least 1", 400);
+  }
+
+  // Validate user exists
+  if (!req.user || !req.user._id) {
+    throw new ApiError("User authentication failed. Please login again.", 401);
+  }
+
+  const cart = await Cart.findOne({
+    user: req.user._id,
+    isActive: true,
+    "hostelItems._id": itemId,
+  }).populate({
+    path: "hostelItems.hostel",
+    select: "name location images ratings rooms",
+  });
+
+  if (!cart) {
+    throw new ApiError("Cart item not found", 404);
+  }
+
+  // Find the specific hostel item
+  const hostelItem = cart.hostelItems.id(itemId);
+  if (!hostelItem) {
+    throw new ApiError("Cart item not found", 404);
+  }
+
+  // Check availability for the new quantity
+  const availability = await checkHostelAvailability(
+    hostelItem.hostel._id,
+    hostelItem.roomType,
+    cart.hostelDates.checkIn,
+    cart.hostelDates.checkOut
+  );
+
+  if (availability.available < quantity) {
+    throw new ApiError(
+      `Only ${availability.available} beds available for the selected period`,
+      400
+    );
+  }
+
+  // Update quantity and recalculate total price
+  hostelItem.quantity = quantity;
+  hostelItem.totalPrice = hostelItem.pricePerNight * hostelItem.numberOfNights * quantity;
+
+  // Recalculate cart pricing
+  cart.pricing.hostelSubtotal = cart.hostelItems.reduce(
+    (total, item) => total + item.totalPrice,
+    0
+  );
+  cart.pricing.subtotal = cart.pricing.bikeSubtotal + cart.pricing.hostelSubtotal;
+  cart.pricing.gst = Math.round((cart.pricing.subtotal * cart.pricing.gstPercentage) / 100);
+  cart.pricing.total = cart.pricing.subtotal + cart.pricing.gst;
+
+  cart.expiresAt = new Date(Date.now() + 30 * 60 * 1000); // Extend expiry
+  await cart.save();
+
+  // Populate hostel details
+  await cart.populate({
+    path: "hostelItems.hostel",
+    select: "name location images ratings",
+  });
+
+  res.status(200).json({
+    success: true,
+    data: cart,
+    message: `Updated quantity to ${quantity}`,
+  });
+});
+
 // Helper function to check bike availability
 async function checkBikeAvailability(
   bikeId,
@@ -1397,31 +1477,25 @@ async function checkHostelAvailability(hostelId, roomType, checkIn, checkOut) {
   const checkOutDate = new Date(checkOut);
 
   // Find overlapping bookings
+  // Use strict inequality to allow same-day check-out/check-in turnover
+  // Example: Existing booking ends Jan 28, new booking starts Jan 28 = OK
   const overlappingBookings = await Booking.find({
-    bookingType: { $in: ["hotel", "hostel"] },
-    hotel: hostelId,
+    bookingType: "hostel",
+    hostel: hostelId,
     roomType: roomType,
     $or: [
       {
-        startDate: { $lte: checkOutDate },
-        endDate: { $gte: checkInDate },
+        startDate: { $lt: checkOutDate },  // Existing booking starts before new check-out
+        endDate: { $gt: checkInDate },     // Existing booking ends after new check-in
       },
     ],
     bookingStatus: { $nin: ["cancelled"] },
-  });
+  }).select("numberOfBeds");
 
-  // Count total beds booked
+  // Count total beds booked (sum of numberOfBeds from all overlapping bookings)
   let totalBookedBeds = 0;
   overlappingBookings.forEach((booking) => {
-    if (booking.hotelDetails && booking.hotelDetails.roomOptions) {
-      const roomOptions = booking.hotelDetails.roomOptions;
-      totalBookedBeds +=
-        (roomOptions.bedOnly?.quantity || 0) +
-        (roomOptions.bedAndBreakfast?.quantity || 0) +
-        (roomOptions.bedBreakfastAndDinner?.quantity || 0);
-    } else {
-      totalBookedBeds += 1;
-    }
+    totalBookedBeds += booking.numberOfBeds || 1;
   });
 
   const available = Math.max(0, room.totalBeds - totalBookedBeds);

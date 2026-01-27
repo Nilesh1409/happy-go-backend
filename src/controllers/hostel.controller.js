@@ -67,22 +67,25 @@ export const getAvailableHostels = asyncHandler(async (req, res) => {
   }
 
   // Find all bookings that overlap with the requested time period
+  // Use strict inequality to allow same-day check-out/check-in
+  // (e.g., check-out on Jan 28 at 10 AM, check-in on Jan 28 at 1 PM)
   const bookings = await Booking.find({
-    bookingType: { $in: ["hotel", "hostel"] },
+    bookingType: "hostel",
     $or: [
       {
-        startDate: { $lte: checkOutDate },
-        endDate: { $gte: checkInDate },
+        startDate: { $lt: checkOutDate },  // Existing booking starts before new check-out
+        endDate: { $gt: checkInDate },     // Existing booking ends after new check-in
       },
     ],
     bookingStatus: { $nin: ["cancelled"] },
-  });
+  }).select("hostel roomType numberOfBeds");
 
   // Group bookings by hostel and room type
   const bookedBeds = {};
   bookings.forEach((booking) => {
-    const hostelId = booking.hotel?.toString();
+    const hostelId = booking.hostel?.toString();
     const roomType = booking.roomType;
+    const bedsBooked = booking.numberOfBeds || 1;
 
     if (!hostelId || !roomType) return;
 
@@ -94,16 +97,8 @@ export const getAvailableHostels = asyncHandler(async (req, res) => {
       bookedBeds[hostelId][roomType] = 0;
     }
 
-    // Count total beds booked
-    if (booking.hotelDetails && booking.hotelDetails.roomOptions) {
-      const roomOptions = booking.hotelDetails.roomOptions;
-      bookedBeds[hostelId][roomType] +=
-        (roomOptions.bedOnly?.quantity || 0) +
-        (roomOptions.bedAndBreakfast?.quantity || 0) +
-        (roomOptions.bedBreakfastAndDinner?.quantity || 0);
-    } else {
-      bookedBeds[hostelId][roomType] += 1;
-    }
+    // Add the number of beds booked
+    bookedBeds[hostelId][roomType] += bedsBooked;
   });
 
   // Calculate number of nights
@@ -132,7 +127,7 @@ export const getAvailableHostels = asyncHandler(async (req, res) => {
             return false;
           }
 
-          // Calculate number of booked beds
+          // Calculate number of booked beds for this room
           const hostelId = hostel._id.toString();
           const roomType = room.type;
           const bookedCount =
@@ -142,7 +137,10 @@ export const getAvailableHostels = asyncHandler(async (req, res) => {
 
           // Check if there are available beds
           const availableCount = room.totalBeds - bookedCount;
+          
+          // Add availability info to room
           room.availableBeds = Math.max(0, availableCount);
+          room.bookedBeds = bookedCount;
 
           return availableCount > 0;
         })
@@ -239,15 +237,94 @@ export const getAvailableHostels = asyncHandler(async (req, res) => {
 // @route   GET /api/hostels/:id
 // @access  Public
 export const getHostel = asyncHandler(async (req, res) => {
+  const { checkIn, checkOut } = req.query;
+  
   const hostel = await Hostel.findById(req.params.id);
 
   if (!hostel) {
     throw new ApiError("Hostel not found", 404);
   }
 
+  const hostelObj = hostel.toObject();
+
+  // If dates are provided, calculate real-time availability for each room
+  if (checkIn && checkOut) {
+    const checkInDate = new Date(checkIn);
+    const checkOutDate = new Date(checkOut);
+
+    // Find overlapping bookings for this hostel
+    // Use strict inequality to allow same-day turnover
+    const overlappingBookings = await Booking.find({
+      bookingType: "hostel",
+      hostel: hostel._id,
+      $or: [
+        {
+          startDate: { $lt: checkOutDate },  // Existing starts before new check-out
+          endDate: { $gt: checkInDate },     // Existing ends after new check-in
+        },
+      ],
+      bookingStatus: { $nin: ["cancelled"] },
+    }).select("roomType numberOfBeds");
+
+    // Group booked beds by room type
+    const bookedBedsByRoom = {};
+    overlappingBookings.forEach((booking) => {
+      const roomType = booking.roomType;
+      const beds = booking.numberOfBeds || 1;
+      bookedBedsByRoom[roomType] = (bookedBedsByRoom[roomType] || 0) + beds;
+    });
+
+    // Calculate available beds for each room
+    hostelObj.rooms = hostelObj.rooms.map((room) => {
+      const bookedCount = bookedBedsByRoom[room.type] || 0;
+      const availableCount = room.totalBeds - bookedCount;
+      
+      return {
+        ...room,
+        availableBeds: Math.max(0, availableCount),
+        bookedBeds: bookedCount,
+      };
+    });
+
+    hostelObj.searchDates = {
+      checkIn: checkInDate,
+      checkOut: checkOutDate,
+    };
+  } else {
+    // No dates provided - calculate current overall availability
+    const allBookings = await Booking.find({
+      bookingType: "hostel",
+      hostel: hostel._id,
+      bookingStatus: { $nin: ["cancelled", "completed"] },
+    }).select("roomType numberOfBeds startDate endDate");
+
+    // Group by room type (only count active bookings)
+    const bookedBedsByRoom = {};
+    const now = new Date();
+    allBookings.forEach((booking) => {
+      // Only count if booking is currently active or future
+      if (new Date(booking.endDate) >= now) {
+        const roomType = booking.roomType;
+        const beds = booking.numberOfBeds || 1;
+        bookedBedsByRoom[roomType] = (bookedBedsByRoom[roomType] || 0) + beds;
+      }
+    });
+
+    hostelObj.rooms = hostelObj.rooms.map((room) => {
+      const bookedCount = bookedBedsByRoom[room.type] || 0;
+      const availableCount = room.totalBeds - bookedCount;
+      
+      return {
+        ...room,
+        availableBeds: Math.max(0, availableCount),
+        bookedBeds: bookedCount,
+      };
+    });
+  }
+
   res.status(200).json({
     success: true,
-    data: hostel,
+    data: hostelObj,
   });
 });
 

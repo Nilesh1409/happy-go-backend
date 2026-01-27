@@ -12,6 +12,7 @@
     "cleanup:invalid-items": "node src/scripts/cleanupInvalidCartItems.js",
     "fix:combined-payments": "node src/scripts/fixCombinedBookingPayments.js",
     "fix:missing-payment": "node src/scripts/addMissingPaymentHistory.js",
+    "fix:pending-payments": "node src/scripts/fixPendingPayments.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [
