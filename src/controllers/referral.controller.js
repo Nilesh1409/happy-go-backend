@@ -29,8 +29,8 @@ export const validateReferralCode = asyncHandler(async (req, res) => {
         name: referrer.name,
         referralCode: referrer.referralCode,
       },
-      reward: 500, // ₹500 reward
-      message: `You'll get ₹500 off on your first booking when referred by ${referrer.name}!`,
+      reward: 100, // ₹100 reward
+      message: `You'll get ₹100 off on your first booking when referred by ${referrer.name}!`,
     },
   });
 });
