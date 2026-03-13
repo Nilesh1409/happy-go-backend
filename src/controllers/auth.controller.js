@@ -73,7 +73,7 @@ export const registerUser = asyncHandler(async (req, res) => {
       referred: user._id,
       referralCode: referralCode.trim().toUpperCase(),
       status: "pending",
-      reward: 500, // ₹500 reward
+      reward: 100, // ₹100 reward
       expiryDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
     });
   }
@@ -132,7 +132,7 @@ export const registerUser = asyncHandler(async (req, res) => {
               You've been referred by ${referrer.name}
             </p>
             <div style="background-color: #FFCC02; color: #333; padding: 10px; border-radius: 6px; font-weight: bold;">
-              Earn ₹500 when you complete your first booking!
+              Earn ₹100 when you complete your first booking!
             </div>
           </div>
         </div>
