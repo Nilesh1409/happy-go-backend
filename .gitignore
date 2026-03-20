@@ -6,4 +6,15 @@
 .env.production.local
 
 # Dependencies
-/node_modules
+node_modules
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+
+# Build output
+dist
+build

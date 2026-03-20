@@ -108,8 +108,18 @@ export const getTrendingBikes = asyncHandler(async (req, res) => {
 
   const { startDate, endDate, startTime, endTime } = getDefaultSearchPeriod();
 
-  // Get trending bikes
-  const bikes = await Bike.find({ isTrending: true }).limit(10);
+  // Get trending bikes (with sensible fallback if none are marked as trending)
+  let bikes = await Bike.find({ isTrending: true }).limit(10);
+
+  // Fallback: if no bikes are explicitly marked as trending, pick recent available bikes
+  if (!bikes || bikes.length === 0) {
+    bikes = await Bike.find({
+      isAvailable: true,
+      status: { $ne: "unavailable" },
+    })
+      .sort({ createdAt: -1 })
+      .limit(10);
+  }
 
   // Build Date objects for requested period
   const startRequested = new Date(`${startDate}T${startTime}:00`);
