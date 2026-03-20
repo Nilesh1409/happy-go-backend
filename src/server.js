@@ -27,6 +27,8 @@ import simpleUploadRoutes from "./routes/simpleUpload.routes.js";
 import fileUploadRoutes from "./routes/fileUpload.routes.js";
 import aadhaarRoutes from "./routes/aadhaar.routes.js";
 import cartRoutes from "./routes/cart.routes.js";
+import popupRoutes from "./routes/popup.routes.js";
+import hostelOverviewRoutes from "./routes/hostelOverview.routes.js";
 
 // Middleware
 import { errorHandler } from "./middleware/error.middleware.js";
@@ -75,6 +77,8 @@ app.use("/api/cart", cartRoutes);
 // app.use("/api/simple-upload", simpleUploadRoutes);
 app.use("/api/simple-upload", fileUploadRoutes);
 app.use("/api/verification/aadhaar", aadhaarRoutes);
+app.use("/api/popup", popupRoutes);
+app.use("/api/hostel-overview", hostelOverviewRoutes);
 
 // Error handling
 app.use(notFound);
