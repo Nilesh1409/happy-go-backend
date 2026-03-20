@@ -26,14 +26,12 @@ export const upsertPopup = asyncHandler(async (req, res) => {
     const file = req.files.image[0];
     validateImageFile(file);
     const ext = file.originalname.split(".").pop();
-    const newKey = `popups/main/${uuidv4()}.${ext}`;
-    await uploadToS3Image({
+    const key = `popups/main/${uuidv4()}.${ext}`;
+    imageKey = await uploadToS3Image({
       buffer: file.buffer,
-      fileName: newKey,
+      fileName: key,
       contentType: file.mimetype,
-      acl: "public-read",
     });
-    imageKey = newKey;
   }
 
   const popup = await Popup.findOneAndUpdate(
@@ -104,9 +102,7 @@ const formatPopup = (popup) => {
     title: obj.title,
     description: obj.description,
     show: obj.show,
-    imageUrl: obj.imageKey
-      ? `https://${process.env.AWS_S3_BUCKET}.s3.${process.env.AWS_REGION}.amazonaws.com/${obj.imageKey}`
-      : null,
+    imageUrl: obj.imageKey || null,
     updatedAt: obj.updatedAt,
     createdAt: obj.createdAt,
   };

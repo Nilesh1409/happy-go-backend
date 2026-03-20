@@ -22,18 +22,17 @@ const s3 = configureAWS();
 // Resolve bucket name lazily so dotenv has time to load
 const getBucket = () => process.env.S3_BUCKET_NAME || process.env.AWS_S3_BUCKET;
 
-export const uploadToS3Image = async ({ buffer, fileName, contentType, acl = "private" }) => {
+export const uploadToS3Image = async ({ buffer, fileName, contentType }) => {
   console.log("uploadToS3Image getBucket(),", getBucket());
   const params = {
     Bucket: getBucket(),
     Key: fileName,
     Body: buffer,
     ContentType: contentType,
-    ACL: acl,
   };
 
-  await s3.upload(params).promise();
-  return fileName; // Return the key
+  const { Location } = await s3.upload(params).promise();
+  return Location; // Return direct S3 URL
 };
 
 export const getSignedUrl = (key, expires = 3600) => {

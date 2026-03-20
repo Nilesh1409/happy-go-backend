@@ -24,13 +24,12 @@ export const upsertHostelOverview = asyncHandler(async (req, res) => {
       validateImageFile(file);
       const ext = file.originalname.split(".").pop();
       const key = `hostel-overview/${uuidv4()}.${ext}`;
-      await uploadToS3Image({
+      const url = await uploadToS3Image({
         buffer: file.buffer,
         fileName: key,
         contentType: file.mimetype,
-        acl: "public-read",
       });
-      imageKeys.push(key);
+      imageKeys.push(url);
     }
   }
 
@@ -102,10 +101,7 @@ const formatOverview = (overview) => {
   return {
     title: obj.title,
     description: obj.description,
-    images: (obj.imageKeys || []).map(
-      (key) =>
-        `https://${process.env.AWS_S3_BUCKET}.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`
-    ),
+    images: obj.imageKeys || [],
     updatedAt: obj.updatedAt,
     createdAt: obj.createdAt,
   };
