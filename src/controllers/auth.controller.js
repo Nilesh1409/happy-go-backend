@@ -163,12 +163,17 @@ export const registerUser = asyncHandler(async (req, res) => {
     </div>
   `;
 
-  // Send email
-  await sendEmail({
-    email: user.email,
-    subject: "Welcome to Happy Go - Verify Your Account",
-    message,
-  });
+  // Send email (non‑blocking in dev/local)
+  try {
+    await sendEmail({
+      email: user.email,
+      subject: "Welcome to Happy Go - Verify Your Account",
+      message,
+    });
+  } catch (emailError) {
+    console.error("❌ Failed to send welcome/verification email:", emailError);
+    // Do NOT throw – allow registration + OTP flow to continue in dev
+  }
 
   console.log("🚀 ~ registerUser ~ mobileOTP from 2Factor:", mobileOTP);
   console.log("🚀 ~ registerUser ~ smsResult:", smsResult);

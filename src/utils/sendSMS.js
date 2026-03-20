@@ -15,12 +15,6 @@ export const sendSMS = async (options) => {
     throw new Error("sendSMS: 'phone' is required");
   }
 
-  // 2Factor credentials
-  const apiKey = process.env.TWOFACTOR_API_KEY;
-  if (!apiKey) {
-    throw new Error("TWOFACTOR_API_KEY is not set in environment");
-  }
-
   // Prepare mobile number for 2Factor (with country code)
   const sanitizeIndianMobile = (raw) => {
     const digits = (raw || "").replace(/\D/g, "");
@@ -28,6 +22,40 @@ export const sendSMS = async (options) => {
     return `91${lastTen}`;
   };
   const recipient = sanitizeIndianMobile(phone);
+
+  // 2Factor credentials
+  const apiKey = process.env.TWOFACTOR_API_KEY;
+
+  // In non‑production or when using a dummy/missing key, generate OTP locally
+  const isDevEnvironment =
+    process.env.NODE_ENV !== "production" ||
+    !apiKey ||
+    apiKey.toLowerCase().startsWith("dummy");
+
+  if (isDevEnvironment) {
+    const devOtp = Math.floor(100000 + Math.random() * 900000).toString();
+
+    console.log(
+      "🔐 Dev mode OTP generated (no SMS sent).",
+      "Phone:",
+      recipient,
+      "OTP:",
+      devOtp
+    );
+
+    return {
+      success: true,
+      message:
+        "Development mode: OTP generated locally. No SMS was sent. Check server logs for the OTP.",
+      otp: devOtp,
+      sessionId: "dev-session",
+      provider: "dev-local",
+    };
+  }
+
+  if (!apiKey) {
+    throw new Error("TWOFACTOR_API_KEY is not set in environment");
+  }
 
   try {
     console.log("Sending OTP via 2Factor AUTOGEN2...");
