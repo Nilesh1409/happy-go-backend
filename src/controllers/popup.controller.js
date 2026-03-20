@@ -1,6 +1,6 @@
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
-import { uploadToS3Image, getSignedUrl } from "../utils/s3.js";
+import { uploadToS3Image } from "../utils/s3.js";
 import Popup from "../models/popup.model.js";
 import { v4 as uuidv4 } from "uuid";
 
@@ -31,6 +31,7 @@ export const upsertPopup = asyncHandler(async (req, res) => {
       buffer: file.buffer,
       fileName: newKey,
       contentType: file.mimetype,
+      acl: "public-read",
     });
     imageKey = newKey;
   }
@@ -103,7 +104,9 @@ const formatPopup = (popup) => {
     title: obj.title,
     description: obj.description,
     show: obj.show,
-    imageUrl: obj.imageKey ? getSignedUrl(obj.imageKey) : null,
+    imageUrl: obj.imageKey
+      ? `https://${process.env.AWS_S3_BUCKET}.s3.${process.env.AWS_REGION}.amazonaws.com/${obj.imageKey}`
+      : null,
     updatedAt: obj.updatedAt,
     createdAt: obj.createdAt,
   };

@@ -1,6 +1,6 @@
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
-import { uploadToS3Image, getSignedUrl } from "../utils/s3.js";
+import { uploadToS3Image } from "../utils/s3.js";
 import HostelOverview from "../models/hostelOverview.model.js";
 import { v4 as uuidv4 } from "uuid";
 
@@ -28,6 +28,7 @@ export const upsertHostelOverview = asyncHandler(async (req, res) => {
         buffer: file.buffer,
         fileName: key,
         contentType: file.mimetype,
+        acl: "public-read",
       });
       imageKeys.push(key);
     }
@@ -101,7 +102,10 @@ const formatOverview = (overview) => {
   return {
     title: obj.title,
     description: obj.description,
-    images: obj.imageKeys || [],
+    images: (obj.imageKeys || []).map(
+      (key) =>
+        `https://${process.env.AWS_S3_BUCKET}.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`
+    ),
     updatedAt: obj.updatedAt,
     createdAt: obj.createdAt,
   };
