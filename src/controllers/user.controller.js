@@ -108,6 +108,7 @@ export const uploadDLImage = asyncHandler(async (req, res) => {
 
   const fileExtension = req.file.originalname.split(".").pop();
   const fileKey = `dl/${req.user._id}/${uuidv4()}.${fileExtension}`;
+  console.log("fileKey");
 
   try {
     await uploadToS3Image({
@@ -115,6 +116,7 @@ export const uploadDLImage = asyncHandler(async (req, res) => {
       fileName: fileKey,
       contentType: req.file.mimetype,
     });
+    console.log("fileKey uploaded to S3");
 
     const user = await User.findByIdAndUpdate(
       req.user._id,
@@ -122,6 +124,7 @@ export const uploadDLImage = asyncHandler(async (req, res) => {
       { new: true, select: "dlImageKey name email mobile" }
     );
 
+    console.log("user",);
     // Generate pre-signed URL for immediate access
     const dlImageUrl = getSignedUrl(fileKey);
 

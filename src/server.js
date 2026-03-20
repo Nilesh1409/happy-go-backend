@@ -38,6 +38,7 @@ dotenv.config();
 
 const app = express();
 const httpServer = createServer(app);
+//print cashfree client id and secret
 
 // Security middleware
 app.set("trust proxy", 1);
