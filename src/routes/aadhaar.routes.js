@@ -1,13 +1,20 @@
 import express from "express";
-
-const router = express.Router();
 import {
-  generateAadhaarOtp,
-  verifyAadhaarOtp,
+  initiateDigilocker,
+  getDigilockerStatus,
+  completeDigilocker,
 } from "../controllers/aadhaar.controller.js";
 import { protect } from "../middleware/auth.middleware.js";
 
-router.post("/generate-otp", protect, generateAadhaarOtp);
-router.post("/verify", protect, verifyAadhaarOtp);
+const router = express.Router();
+
+// Step 1 — Generate DigiLocker consent URL
+router.post("/initiate", protect, initiateDigilocker);
+
+// Step 2 — Poll verification status
+router.get("/status", protect, getDigilockerStatus);
+
+// Step 3 — Fetch Aadhaar document and save to user (call after AUTHENTICATED)
+router.post("/complete", protect, completeDigilocker);
 
 export default router;

@@ -95,6 +95,7 @@ const userSchema = new mongoose.Schema(
       yearOfBirth: Number,
       photoKey: String,
       shareCode: String,
+      tempVerificationId: { type: String, default: null },
     },
     dlImageKey: String,
   },

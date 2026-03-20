@@ -23,6 +23,7 @@ const s3 = configureAWS();
 const getBucket = () => process.env.S3_BUCKET_NAME || process.env.AWS_S3_BUCKET;
 
 export const uploadToS3Image = async ({ buffer, fileName, contentType }) => {
+  console.log("uploadToS3Image getBucket(),", getBucket());
   const params = {
     Bucket: getBucket(),
     Key: fileName,
