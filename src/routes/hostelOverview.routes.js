@@ -15,7 +15,7 @@ router.get("/", getHostelOverview);
 // Admin — create or fully replace the hostel overview
 router.post(
   "/",
-  adminProtect,
+  // adminProtect,
   upload.fields([{ name: "images", maxCount: 10 }]),
   upsertHostelOverview
 );

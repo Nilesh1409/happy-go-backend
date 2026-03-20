@@ -14,7 +14,7 @@ export const upsertPopup = asyncHandler(async (req, res) => {
     throw new ApiError("title and description are required", 400);
   }
 
-  if (show && !["always", "once"].includes(show)) {
+  if (show && !["always", "once", "never"].includes(show)) {
     throw new ApiError("show must be 'always' or 'once'", 400);
   }
 
