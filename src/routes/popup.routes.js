@@ -11,7 +11,7 @@ router.get("/", getPopup);
 // Admin — create or fully replace the popup
 router.post(
   "/",
-  adminProtect,
+  // adminProtect,
   upload.fields([{ name: "image", maxCount: 1 }]),
   upsertPopup
 );
