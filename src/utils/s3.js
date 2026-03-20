@@ -16,13 +16,19 @@ const configureAWS = () => {
   return new AWS.S3();
 };
 
+// Module-level S3 instance used by uploadToS3Image and getSignedUrl
+const s3 = configureAWS();
+
+// Resolve bucket name lazily so dotenv has time to load
+const getBucket = () => process.env.S3_BUCKET_NAME || process.env.AWS_S3_BUCKET;
+
 export const uploadToS3Image = async ({ buffer, fileName, contentType }) => {
   const params = {
-    Bucket: process.env.S3_BUCKET_NAME,
+    Bucket: getBucket(),
     Key: fileName,
     Body: buffer,
     ContentType: contentType,
-    ACL: "private", // Ensure private access
+    ACL: "private",
   };
 
   await s3.upload(params).promise();
@@ -31,7 +37,7 @@ export const uploadToS3Image = async ({ buffer, fileName, contentType }) => {
 
 export const getSignedUrl = (key, expires = 3600) => {
   const params = {
-    Bucket: process.env.S3_BUCKET_NAME,
+    Bucket: getBucket(),
     Key: key,
     Expires: expires,
   };

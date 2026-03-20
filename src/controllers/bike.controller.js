@@ -385,7 +385,7 @@ export const getAvailableBikes = asyncHandler(async (req, res) => {
 
   const rawBookings = await Booking.find({
     bookingType: "bike",
-    bookingStatus: { $in: ["confirmed", "pending"] },
+    bookingStatus: { $in: ["confirmed"] },
     startDate: { $lte: endDateOnly },
     endDate: { $gte: startDateOnly },
   });
@@ -731,7 +731,7 @@ export const getBikes = asyncHandler(async (req, res) => {
     {
       $match: {
         bookingType: "bike",
-        bookingStatus: { $in: ["confirmed", "pending"] },
+        bookingStatus: { $in: ["confirmed"] },
         startDate: { $lte: new Date() },
         endDate: { $gte: new Date() },
       },
@@ -823,7 +823,7 @@ export const getBike = asyncHandler(async (req, res) => {
       {
         $match: {
           bookingType: "bike",
-          bookingStatus: { $in: ["confirmed", "pending"] },
+          bookingStatus: { $in: ["confirmed"] },
           startDate: { $lte: new Date(`${endDate}T23:59:59`) },
           endDate: { $gte: new Date(`${startDate}T00:00:00`) },
         },
@@ -856,7 +856,7 @@ export const getBike = asyncHandler(async (req, res) => {
       {
         $match: {
           bookingType: "bike",
-          bookingStatus: { $in: ["confirmed", "pending"] },
+          bookingStatus: { $in: ["confirmed"] },
           startDate: { $lte: new Date() },
           endDate: { $gte: new Date() },
         },
@@ -895,7 +895,7 @@ export const getBike = asyncHandler(async (req, res) => {
       {
         $match: {
           bookingType: "bike",
-          bookingStatus: { $in: ["confirmed", "pending"] },
+          bookingStatus: { $in: ["confirmed"] },
           startDate: { $lte: new Date(endDate) },
           endDate: { $gte: new Date(startDate) },
           "helmetDetails.quantity": { $gt: 0 },
@@ -988,7 +988,7 @@ export const updateBike = asyncHandler(async (req, res) => {
     {
       $match: {
         bookingType: "bike",
-        bookingStatus: { $in: ["confirmed", "pending"] },
+        bookingStatus: { $in: ["confirmed"] },
         startDate: { $lte: new Date() },
         endDate: { $gte: new Date() },
       },

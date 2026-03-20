@@ -55,7 +55,7 @@ export const getAvailableHostels = asyncHandler(async (req, res) => {
 
   const hostels = await Hostel.find(query);
 
-  console.log("all hostels", hostels.length, hostels);
+  // console.log("all hostels", hostels.length);
 
   if (hostels.length === 0) {
     return res.status(200).json({
