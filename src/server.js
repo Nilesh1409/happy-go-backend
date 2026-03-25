@@ -96,6 +96,17 @@ mongoose
     const PORT = process.env.PORT || 8080;
     httpServer.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
+
+      // Ping self every 4 minutes to keep Render instance alive
+      const PING_URL = "https://happy-go-backend.onrender.com/api";
+      setInterval(async () => {
+        try {
+          const res = await fetch(PING_URL);
+          console.log(`[Keep-alive] Pinged ${PING_URL} - Status: ${res.status}`);
+        } catch (err) {
+          console.error(`[Keep-alive] Ping failed:`, err.message);
+        }
+      }, 4 * 60 * 1000);
     });
   })
   .catch((error) => {

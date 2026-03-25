@@ -98,6 +98,7 @@ const userSchema = new mongoose.Schema(
       tempVerificationId: { type: String, default: null },
     },
     dlImageKey: String,
+    dlImageUrl: String,   // public S3 URL stored at upload time
   },
   {
     timestamps: true,

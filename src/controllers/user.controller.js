@@ -111,35 +111,25 @@ export const uploadDLImage = asyncHandler(async (req, res) => {
   console.log("fileKey");
 
   try {
-    await uploadToS3Image({
+    const publicUrl = await uploadToS3Image({
       buffer: req.file.buffer,
       fileName: fileKey,
       contentType: req.file.mimetype,
     });
-    console.log("fileKey uploaded to S3");
 
     const user = await User.findByIdAndUpdate(
       req.user._id,
-      { dlImageKey: fileKey },
-      { new: true, select: "dlImageKey name email mobile" }
+      { dlImageKey: fileKey, dlImageUrl: publicUrl },
+      { new: true, select: "dlImageKey dlImageUrl name email mobile" }
     );
-
-    console.log("user",);
-    // Generate pre-signed URL for immediate access
-    const dlImageUrl = getSignedUrl(fileKey);
 
     res.status(200).json({
       success: true,
       message: "Driving license image uploaded successfully",
-      data: { 
+      data: {
         dlImageKey: user.dlImageKey,
-        dlImageUrl: dlImageUrl,
-        user: {
-          id: user._id,
-          name: user.name,
-          email: user.email,
-          mobile: user.mobile
-        }
+        dlImageUrl: user.dlImageUrl,
+        user: { id: user._id, name: user.name, email: user.email, mobile: user.mobile },
       },
     });
   } catch (error) {
@@ -148,23 +138,17 @@ export const uploadDLImage = asyncHandler(async (req, res) => {
   }
 });
 
-// Get user profile with pre-signed URLs
+// Get user profile — dlImageUrl is stored directly in DB (public S3 URL)
 export const getUserProfile = asyncHandler(async (req, res) => {
   const user = await User.findById(req.user._id).select(
-    "-aadhaar.encryptedNumber"
+    "-aadhaar.encryptedNumber -aadhaar.shareCode -aadhaar.tempVerificationId"
   );
 
-  if (user.aadhaar && user.aadhaar.photoKey) {
-    user.aadhaar.photoUrl = getSignedUrl(user.aadhaar.photoKey);
-  }
-
-  if (user.dlImageKey) {
-    user.dlImageUrl = getSignedUrl(user.dlImageKey);
-  }
+  const userObj = user.toObject({ virtuals: true });
 
   res.status(200).json({
     success: true,
-    data: user,
+    data: userObj,
   });
 });
 
@@ -233,42 +217,29 @@ export const uploadAadhaarImage = asyncHandler(async (req, res) => {
   }
 });
 
-// Get user documents status
+// Get user documents status — dlImageUrl is stored directly (public S3 URL)
 export const getDocumentsStatus = asyncHandler(async (req, res) => {
-  const user = await User.findById(req.user._id).select("aadhaar dlImageKey name email mobile");
-
-  const documentsStatus = {
-    aadhaar: {
-      hasDetails: !!(user.aadhaar && user.aadhaar.maskedNumber),
-      hasImage: !!(user.aadhaar && user.aadhaar.photoKey),
-      maskedNumber: user.aadhaar?.maskedNumber || null,
-      name: user.aadhaar?.name || null,
-      dob: user.aadhaar?.dob || null,
-      gender: user.aadhaar?.gender || null,
-    },
-    drivingLicense: {
-      hasImage: !!user.dlImageKey,
-    },
-    user: {
-      id: user._id,
-      name: user.name,
-      email: user.email,
-      mobile: user.mobile
-    }
-  };
-
-  // Add pre-signed URLs if documents exist
-  if (user.aadhaar && user.aadhaar.photoKey) {
-    documentsStatus.aadhaar.photoUrl = getSignedUrl(user.aadhaar.photoKey);
-  }
-
-  if (user.dlImageKey) {
-    documentsStatus.drivingLicense.imageUrl = getSignedUrl(user.dlImageKey);
-  }
+  const user = await User.findById(req.user._id).select(
+    "aadhaar dlImageKey dlImageUrl name email mobile"
+  );
 
   res.status(200).json({
     success: true,
-    data: documentsStatus,
+    data: {
+      aadhaar: {
+        hasDetails: !!(user.aadhaar && user.aadhaar.maskedNumber),
+        hasImage: !!(user.aadhaar && user.aadhaar.photoKey),
+        maskedNumber: user.aadhaar?.maskedNumber || null,
+        name: user.aadhaar?.name || null,
+        dob: user.aadhaar?.dob || null,
+        gender: user.aadhaar?.gender || null,
+      },
+      drivingLicense: {
+        hasImage: !!user.dlImageKey,
+        imageUrl: user.dlImageUrl || null,
+      },
+      user: { id: user._id, name: user.name, email: user.email, mobile: user.mobile },
+    },
   });
 });
 
