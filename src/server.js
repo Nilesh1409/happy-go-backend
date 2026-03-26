@@ -98,7 +98,7 @@ mongoose
       console.log(`Server running on port ${PORT}`);
 
       // Ping self every 4 minutes to keep Render instance alive
-      const PING_URL = "https://happy-go-backend.onrender.com/api";
+      const PING_URL = "https://happy-go-backend.onrender.com/api/bikes/trending";
       setInterval(async () => {
         try {
           const res = await fetch(PING_URL);
