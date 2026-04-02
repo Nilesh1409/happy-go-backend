@@ -2,7 +2,7 @@ import User from "../models/user.model.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 
-import { uploadToS3Image, getSignedUrl } from "../utils/s3.js";
+import { uploadToS3Image, getSignedUrl, deleteFromS3ByKey } from "../utils/s3.js";
 import { v4 as uuidv4 } from "uuid";
 
 // Update Aadhaar details
@@ -108,34 +108,76 @@ export const uploadDLImage = asyncHandler(async (req, res) => {
 
   const fileExtension = req.file.originalname.split(".").pop();
   const fileKey = `dl/${req.user._id}/${uuidv4()}.${fileExtension}`;
-  console.log("fileKey");
+  console.log("DL upload — fileKey:", fileKey, "| size:", req.file.size, "| mime:", req.file.mimetype);
 
+  // Upload the new image to S3 first — if this fails we abort with no side-effects
+  let publicUrl;
   try {
-    const publicUrl = await uploadToS3Image({
+    publicUrl = await uploadToS3Image({
       buffer: req.file.buffer,
       fileName: fileKey,
       contentType: req.file.mimetype,
     });
-
-    const user = await User.findByIdAndUpdate(
-      req.user._id,
-      { dlImageKey: fileKey, dlImageUrl: publicUrl },
-      { new: true, select: "dlImageKey dlImageUrl name email mobile" }
+    console.log("DL uploaded to S3:", publicUrl);
+  } catch (s3Error) {
+    console.error("S3 upload error:", s3Error.message, s3Error.code || "");
+    const isDev = process.env.NODE_ENV !== "production";
+    throw new ApiError(
+      isDev
+        ? `S3 upload failed: ${s3Error.message}`
+        : "Failed to upload driving license image. Please try again.",
+      500
     );
-
-    res.status(200).json({
-      success: true,
-      message: "Driving license image uploaded successfully",
-      data: {
-        dlImageKey: user.dlImageKey,
-        dlImageUrl: user.dlImageUrl,
-        user: { id: user._id, name: user.name, email: user.email, mobile: user.mobile },
-      },
-    });
-  } catch (error) {
-    console.error("Error uploading DL image:", error);
-    throw new ApiError("Failed to upload driving license image. Please try again.", 500);
   }
+
+  // Fetch the current user to check for an existing DL image
+  const existingUser = await User.findById(req.user._id).select(
+    "dlImageKey dlImageUrl dlImageHistory"
+  );
+
+  const oldKey = existingUser?.dlImageKey || null;
+  const oldUrl = existingUser?.dlImageUrl || null;
+
+  // Build the update: set new image + optionally push old one to history
+  const update = {
+    dlImageKey: fileKey,
+    dlImageUrl: publicUrl,
+  };
+
+  if (oldKey) {
+    // Archive the old reference so developers can still look it up
+    update.$push = {
+      dlImageHistory: {
+        key: oldKey,
+        url: oldUrl || null,
+        replacedAt: new Date(),
+      },
+    };
+  }
+
+  const user = await User.findByIdAndUpdate(req.user._id, update, {
+    new: true,
+    select: "dlImageKey dlImageUrl name email mobile",
+  });
+
+  // Delete the old S3 object AFTER the DB is updated successfully.
+  // deleteFromS3ByKey swallows errors so a failed delete never crashes the response.
+  if (oldKey) {
+    await deleteFromS3ByKey(oldKey);
+  }
+
+  const isUpdate = !!oldKey;
+  res.status(200).json({
+    success: true,
+    message: isUpdate
+      ? "Driving license image updated successfully"
+      : "Driving license image uploaded successfully",
+    data: {
+      dlImageKey: user.dlImageKey,
+      dlImageUrl: user.dlImageUrl,
+      user: { id: user._id, name: user.name, email: user.email, mobile: user.mobile },
+    },
+  });
 });
 
 // Get user profile — dlImageUrl is stored directly in DB (public S3 URL)

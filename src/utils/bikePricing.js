@@ -402,8 +402,8 @@ export async function calculateCartPricing({
   // Apply bulk discount
   const afterBulkDiscount = roundToTwo(subtotal - bulkDiscount.amount);
 
-  // Calculate extra charges (once per booking)
-  const extraCharges = calculateTimeBasedCharges(startTime, endTime);
+  // Calculate extra charges per bike (multiplied by total quantity)
+  const extraCharges = calculateTimeBasedCharges(startTime, endTime) * totalQuantity;
 
   // Calculate helmet charges
   const { default: Helmet } = await import("../models/helmet.model.js");

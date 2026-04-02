@@ -4,6 +4,7 @@ import Order from "../models/order.model.js";
 import Bike from "../models/bike.model.js";
 import BikeMaintenanceRecord from "../models/bikeMaintenance.model.js";
 import EmployeeDocument from "../models/employeeDocument.model.js";
+import User from "../models/user.model.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import bcrypt from "bcryptjs";
@@ -682,6 +683,7 @@ export const getEmployeeBookingById = asyncHandler(async (req, res) => {
     updatedAt: booking.updatedAt,
     notes: booking.specialRequests || "",
     customer: {
+      id: booking.user ? booking.user._id : null,
       name: booking.user ? booking.user.name : "Unknown Customer",
       email: booking.user ? booking.user.email : "N/A",
       phone: booking.user ? booking.user.mobile : "N/A",
@@ -1688,5 +1690,49 @@ export const deleteDocument = asyncHandler(async (req, res) => {
   res.status(200).json({
     success: true,
     message: "Document deleted successfully",
+  });
+});
+
+// @desc    Get user's Aadhaar and DL verification details (for admin at pickup/checkin)
+// @route   GET /api/employee/users/:userId/verification
+// @access  Private/Employee
+export const getUserVerification = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.params.userId).select(
+    "name email mobile aadhaar dlImageUrl dlImageKey"
+  );
+
+  if (!user) {
+    throw new ApiError("User not found", 404);
+  }
+
+  const hasAadhaar = !!(user.aadhaar && user.aadhaar.maskedNumber);
+  const hasDL = !!user.dlImageUrl;
+
+  res.status(200).json({
+    success: true,
+    data: {
+      userId: user._id,
+      name: user.name,
+      email: user.email,
+      phone: user.mobile,
+      aadhaar: hasAadhaar
+        ? {
+            verified: true,
+            maskedNumber: user.aadhaar.maskedNumber,
+            name: user.aadhaar.name,
+            dob: user.aadhaar.dob,
+            gender: user.aadhaar.gender,
+            careOf: user.aadhaar.careOf,
+            address: user.aadhaar.address?.full,
+            yearOfBirth: user.aadhaar.yearOfBirth,
+          }
+        : { verified: false },
+      drivingLicense: hasDL
+        ? {
+            uploaded: true,
+            imageUrl: user.dlImageUrl,
+          }
+        : { uploaded: false },
+    },
   });
 });
