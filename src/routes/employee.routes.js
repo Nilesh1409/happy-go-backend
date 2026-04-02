@@ -21,6 +21,7 @@ import {
   updateProfile,
   getEmployeeBookings,
   getEmployeeBookingById,
+  getUserVerification,
 } from "../controllers/employee.controller.js";
 
 import { markPaymentCompleted } from "../controllers/admin.controller.js";
@@ -105,6 +106,9 @@ router.get(
 // Booking routes
 router.get("/bookings", employeeProtect, getEmployeeBookings);
 router.get("/bookings/:id", employeeProtect, getEmployeeBookingById);
+
+// User verification (Aadhaar + DL) — for pickup/check-in
+router.get("/users/:userId/verification", employeeProtect, getUserVerification);
 router.put("/bookings/:id/status", employeeProtect, updateBookingStatus);
 router.put("/bookings/:id/complete-payment", employeeProtect, markPaymentCompleted);
 

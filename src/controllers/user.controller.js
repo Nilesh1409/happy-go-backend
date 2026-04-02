@@ -2,7 +2,7 @@ import User from "../models/user.model.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 
-import { uploadToS3Image, getSignedUrl } from "../utils/s3.js";
+import { uploadToS3Image, getSignedUrl, deleteFromS3ByKey } from "../utils/s3.js";
 import { v4 as uuidv4 } from "uuid";
 
 // Update Aadhaar details
@@ -110,6 +110,7 @@ export const uploadDLImage = asyncHandler(async (req, res) => {
   const fileKey = `dl/${req.user._id}/${uuidv4()}.${fileExtension}`;
   console.log("DL upload — fileKey:", fileKey, "| size:", req.file.size, "| mime:", req.file.mimetype);
 
+  // Upload the new image to S3 first — if this fails we abort with no side-effects
   let publicUrl;
   try {
     publicUrl = await uploadToS3Image({
@@ -129,15 +130,48 @@ export const uploadDLImage = asyncHandler(async (req, res) => {
     );
   }
 
-  const user = await User.findByIdAndUpdate(
-    req.user._id,
-    { dlImageKey: fileKey, dlImageUrl: publicUrl },
-    { new: true, select: "dlImageKey dlImageUrl name email mobile" }
+  // Fetch the current user to check for an existing DL image
+  const existingUser = await User.findById(req.user._id).select(
+    "dlImageKey dlImageUrl dlImageHistory"
   );
 
+  const oldKey = existingUser?.dlImageKey || null;
+  const oldUrl = existingUser?.dlImageUrl || null;
+
+  // Build the update: set new image + optionally push old one to history
+  const update = {
+    dlImageKey: fileKey,
+    dlImageUrl: publicUrl,
+  };
+
+  if (oldKey) {
+    // Archive the old reference so developers can still look it up
+    update.$push = {
+      dlImageHistory: {
+        key: oldKey,
+        url: oldUrl || null,
+        replacedAt: new Date(),
+      },
+    };
+  }
+
+  const user = await User.findByIdAndUpdate(req.user._id, update, {
+    new: true,
+    select: "dlImageKey dlImageUrl name email mobile",
+  });
+
+  // Delete the old S3 object AFTER the DB is updated successfully.
+  // deleteFromS3ByKey swallows errors so a failed delete never crashes the response.
+  if (oldKey) {
+    await deleteFromS3ByKey(oldKey);
+  }
+
+  const isUpdate = !!oldKey;
   res.status(200).json({
     success: true,
-    message: "Driving license image uploaded successfully",
+    message: isUpdate
+      ? "Driving license image updated successfully"
+      : "Driving license image uploaded successfully",
     data: {
       dlImageKey: user.dlImageKey,
       dlImageUrl: user.dlImageUrl,

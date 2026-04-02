@@ -133,6 +133,28 @@ export const deleteFromS3 = async (fileUrl) => {
 };
 
 /**
+ * Delete a file from S3 by its storage key (not URL).
+ * Uses the same bucket resolution as uploadToS3Image for consistency.
+ * Errors are logged but never thrown — a failed delete should never
+ * block the user's upload workflow.
+ * @param {string} key - S3 object key (e.g. "dl/userId/uuid.jpg")
+ */
+export const deleteFromS3ByKey = async (key) => {
+  if (!key) return;
+  try {
+    const bucket = getBucket();
+    if (!bucket) {
+      console.warn("deleteFromS3ByKey: bucket name not configured, skipping delete for key:", key);
+      return;
+    }
+    await s3.deleteObject({ Bucket: bucket, Key: key }).promise();
+    console.log("S3 object deleted:", key);
+  } catch (error) {
+    console.error("deleteFromS3ByKey error (non-fatal):", key, error.message);
+  }
+};
+
+/**
  * Convert file to base64
  * @param {File} file - File object
  * @returns {Promise<string>} - Base64 encoded file

@@ -99,6 +99,17 @@ const userSchema = new mongoose.Schema(
     },
     dlImageKey: String,
     dlImageUrl: String,   // public S3 URL stored at upload time
+    // History of all previously uploaded DL images.
+    // The active image is always dlImageKey / dlImageUrl.
+    // Old S3 objects are deleted to save storage, but keys and URLs are
+    // preserved here so developers can audit or recover references.
+    dlImageHistory: [
+      {
+        key: { type: String, required: true },
+        url: { type: String },
+        replacedAt: { type: Date, default: Date.now },
+      },
+    ],
   },
   {
     timestamps: true,
