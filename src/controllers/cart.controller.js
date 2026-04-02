@@ -493,17 +493,19 @@ export const addToCart = asyncHandler(async (req, res) => {
 
   // Preserve hostelSubtotal if it exists
   const hostelSubtotal = cart.pricing?.hostelSubtotal || 0;
+  const hostelGst = Math.round((hostelSubtotal * pricing.gstPercentage) / 100);
 
   // Update cart with new pricing (bike pricing + preserve hostel pricing)
+  // pricing.total already includes extraCharges, bulk discount, helmet charges, and GST for bikes
   cart.pricing = {
     bikeSubtotal: pricing.subtotal,
     hostelSubtotal: hostelSubtotal,
     subtotal: pricing.subtotal + hostelSubtotal,
     bulkDiscount: pricing.bulkDiscount,
     extraCharges: pricing.extraCharges,
-    gst: Math.round(((pricing.subtotal + hostelSubtotal) * pricing.gstPercentage) / 100),
+    gst: pricing.gst + hostelGst,
     gstPercentage: pricing.gstPercentage,
-    total: pricing.subtotal + hostelSubtotal + Math.round(((pricing.subtotal + hostelSubtotal) * pricing.gstPercentage) / 100),
+    total: pricing.total + hostelSubtotal + hostelGst,
   };
 
   // Update individual item prices
@@ -626,17 +628,19 @@ export const updateCartItem = asyncHandler(async (req, res) => {
 
   // Preserve hostelSubtotal if it exists
   const hostelSubtotal = cart.pricing?.hostelSubtotal || 0;
+  const hostelGst = Math.round((hostelSubtotal * pricing.gstPercentage) / 100);
 
   // Update cart pricing (bike pricing + preserve hostel pricing)
+  // pricing.total already includes extraCharges, bulk discount, helmet charges, and GST for bikes
   cart.pricing = {
     bikeSubtotal: pricing.subtotal,
     hostelSubtotal: hostelSubtotal,
     subtotal: pricing.subtotal + hostelSubtotal,
     bulkDiscount: pricing.bulkDiscount,
     extraCharges: pricing.extraCharges,
-    gst: Math.round(((pricing.subtotal + hostelSubtotal) * pricing.gstPercentage) / 100),
+    gst: pricing.gst + hostelGst,
     gstPercentage: pricing.gstPercentage,
-    total: pricing.subtotal + hostelSubtotal + Math.round(((pricing.subtotal + hostelSubtotal) * pricing.gstPercentage) / 100),
+    total: pricing.total + hostelSubtotal + hostelGst,
   };
 
   // Update individual item prices
@@ -1157,7 +1161,7 @@ export const getCartDetails = asyncHandler(async (req, res) => {
   }
 
   // Filter out invalid items (deleted bikes/hostels) and add room details to hostel items
-  const validBikeItems = cart.bikeItems.filter((item) => item.bike !== null);
+  let validBikeItems = cart.bikeItems.filter((item) => item.bike !== null);
   const validHostelItems = [];
   const removedItems = {
     bikes: cart.bikeItems.length - validBikeItems.length,
@@ -1178,6 +1182,64 @@ export const getCartDetails = asyncHandler(async (req, res) => {
     validHostelItems.push({
       ...item.toObject(),
       roomDetails: room || null,
+    });
+  }
+
+  // Compute availableQuantity live for each bike based on the cart's date range
+  if (validBikeItems.length > 0 && cart.bikeDates?.startDate) {
+    const startDateOnly = new Date(cart.bikeDates.startDate);
+    startDateOnly.setHours(0, 0, 0, 0);
+    const endDateOnly = new Date(cart.bikeDates.endDate);
+    endDateOnly.setHours(23, 59, 59, 999);
+
+    const rawBookings = await Booking.aggregate([
+      {
+        $match: {
+          bookingType: "bike",
+          bookingStatus: { $in: ["confirmed", "pending"] },
+          startDate: { $lte: endDateOnly },
+          endDate: { $gte: startDateOnly },
+        },
+      },
+      {
+        $addFields: {
+          bikes: {
+            $cond: {
+              if: { $gt: [{ $size: { $ifNull: ["$bikeItems", []] } }, 0] },
+              then: "$bikeItems",
+              else: [{ bike: "$bike", quantity: 1 }],
+            },
+          },
+        },
+      },
+      { $unwind: "$bikes" },
+      {
+        $group: {
+          _id: "$bikes.bike",
+          totalBooked: { $sum: "$bikes.quantity" },
+        },
+      },
+    ]);
+
+    const bookingsByBike = rawBookings.reduce((map, b) => {
+      map[b._id.toString()] = b.totalBooked;
+      return map;
+    }, {});
+
+    validBikeItems = validBikeItems.map((item) => {
+      if (!item.bike) return item;
+      const bikeId = item.bike._id.toString();
+      const totalQuantity = item.bike.quantity;
+      const bookedQuantity = bookingsByBike[bikeId] || 0;
+      return {
+        ...item.toObject(),
+        bike: {
+          ...item.bike.toObject(),
+          totalQuantity,
+          bookedQuantity,
+          availableQuantity: Math.max(0, totalQuantity - bookedQuantity),
+        },
+      };
     });
   }
 

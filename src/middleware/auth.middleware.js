@@ -12,7 +12,7 @@ export const protect = asyncHandler(async (req, res, next) => {
   console.log(`API Request received at: ${requestTime.toISOString()}`);
   console.log(`Request Type: ${req.method}`);
   console.log(`Endpoint: ${req.originalUrl}`);
-  console.log(`Endpoint: ${req.headers.authorization}`);
+  console.log(`Authorization: ${req.headers.authorization ? "Present" : "Missing"}`);
 
   // Check if token exists in headers
   if (
