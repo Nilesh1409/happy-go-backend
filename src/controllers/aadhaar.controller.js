@@ -4,8 +4,9 @@ import { v4 as uuidv4 } from "uuid";
 import { uploadToS3Image } from "../utils/s3.js";
 import User from "../models/user.model.js";
 
-const BASE_URL = "https://sandbox.cashfree.com/verification";
-// Switch to "https://api.cashfree.com/verification" for production
+// Default to sandbox — set CASHFREE_BASE_URL in env to override for production
+const BASE_URL =
+  process.env.CASHFREE_BASE_URL || "https://sandbox.cashfree.com/verification";
 
 const cfHeaders = () => ({
   "Content-Type": "application/json",
