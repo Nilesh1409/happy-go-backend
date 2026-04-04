@@ -769,19 +769,16 @@ export const verifyCartPayment = asyncHandler(async (req, res) => {
       continue;
     }
 
-    // Calculate proportional payment for this booking
-    // If bike is ₹840 and hostel is ₹824, and total paid is ₹416:
-    // Bike gets: (840/1664) × 416 = ₹210
-    // Hostel gets: (824/1664) × 416 = ₹206
-    const bookingProportion = booking.paymentDetails.totalAmount / totalBookingAmount;
-    const proportionalPayment = Math.round(paymentItem.amount * bookingProportion);
+    // The amount in paymentItem was already set proportionally when the cart order was
+    // created (each booking received its share of the partial total). Do NOT
+    // re-proportionalize here — that was the source of the double-division bug.
+    const proportionalPayment = paymentItem.amount;
 
-    // Update payment history item with proportional amount
+    // Mark payment history item as completed
     paymentItem.razorpayPaymentId = razorpay_payment_id;
     paymentItem.status = "completed";
     paymentItem.paidAt = new Date();
     paymentItem.paymentId = razorpay_payment_id;
-    paymentItem.amount = proportionalPayment; // Update with proportional amount
 
     // Update booking payment details with proportional amount
     booking.paymentDetails.paidAmount += proportionalPayment;

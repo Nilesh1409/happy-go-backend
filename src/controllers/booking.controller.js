@@ -1290,14 +1290,14 @@ export const getBooking = asyncHandler(async (req, res) => {
         0
       );
 
-      // Get ACTUAL paid amount from payment history (not from DB paidAmount field)
-      // Find completed payments and sum their amounts (they should already be proportional)
+      // Sum COMPLETED payments across ALL bookings in the group
+      // (each booking stores its proportional share of the partial payment)
       let actualPaidAmount = 0;
-      const paymentHistory = booking.paymentDetails?.paymentHistory || [];
-      
-      for (const payment of paymentHistory) {
-        if (payment.status === "completed") {
-          actualPaidAmount += payment.amount || 0;
+      for (const b of allBookings) {
+        for (const payment of b.paymentDetails?.paymentHistory || []) {
+          if (payment.status === "completed") {
+            actualPaidAmount += payment.amount || 0;
+          }
         }
       }
 
