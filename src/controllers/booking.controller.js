@@ -1153,21 +1153,18 @@ export const getBookingsByPaymentGroup = asyncHandler(async (req, res) => {
 
   const bookings = await Booking.find({ paymentGroupId })
     .populate({
-      path: "bike",
-      select: "title brand model images pricePerDay registrationNumber",
-    })
-    .populate({
       path: "bikeItems.bike",
       select: "title brand model images pricePerDay registrationNumber",
     })
     .populate({
       path: "hostel",
-      select: "name location images rooms ratings",
+      select: "name location images ratings checkInTime checkOutTime address contactInfo",
     })
     .populate({
       path: "user",
       select: "name email mobile",
-    });
+    })
+    .sort({ bookingType: 1 }); // bike first, then hostel
 
   if (bookings.length === 0) {
     throw new ApiError("No bookings found for this payment group", 404);
@@ -1182,57 +1179,123 @@ export const getBookingsByPaymentGroup = asyncHandler(async (req, res) => {
     throw new ApiError("Not authorized to access these bookings", 401);
   }
 
-  // Calculate combined totals
-  const combinedTotals = {
-    totalAmount: bookings.reduce((sum, b) => sum + (b.priceDetails?.totalAmount || 0), 0),
-    paidAmount: bookings[0]?.paymentDetails?.paidAmount || 0,
-    remainingAmount: bookings[0]?.paymentDetails?.remainingAmount || 0,
-    partialPaymentPercentage: bookings[0]?.paymentDetails?.partialPaymentPercentage || 25,
+  // Calculate combined total
+  const combinedTotal = bookings.reduce(
+    (sum, b) => sum + (b.priceDetails?.totalAmount || 0),
+    0
+  );
+
+  // Sum COMPLETED payments across ALL bookings in the group
+  // (each booking stores its proportional share of the partial payment)
+  let actualPaidAmount = 0;
+  for (const b of bookings) {
+    for (const payment of b.paymentDetails?.paymentHistory || []) {
+      if (payment.status === "completed") {
+        actualPaidAmount += payment.amount || 0;
+      }
+    }
+  }
+
+  const combinedRemaining = combinedTotal - actualPaidAmount;
+  const partialPercentage = bookings[0]?.paymentDetails?.partialPaymentPercentage || 25;
+  const primaryBooking = userBooking || bookings[0];
+
+  // Build the same clean response shape as getBooking
+  const response = {
+    paymentGroupId,
+    isCombined: bookings.length > 1,
+    status: bookings.every((b) => b.bookingStatus === "confirmed") ? "confirmed" : primaryBooking.bookingStatus,
+    paymentStatus: bookings.every((b) => b.paymentStatus === "completed") ? "completed" : primaryBooking.paymentStatus,
+    bookedOn: primaryBooking.createdAt,
+
+    paymentSummary: {
+      totalAmount: combinedTotal,
+      paidAmount: actualPaidAmount,
+      remainingAmount: combinedRemaining,
+      partialPercentage,
+      partialAmount: Math.round((combinedTotal * partialPercentage) / 100),
+      paymentMethod: primaryBooking.paymentId ? "online" : "pending",
+    },
+
+    bookings: bookings.map((b) => {
+      const bookingData = {
+        id: b._id,
+        type: b.bookingType,
+        priceBreakdown: {
+          basePrice: b.priceDetails.basePrice || b.priceDetails.subtotal,
+          ...(b.priceDetails.helmetCharges && { helmetCharges: b.priceDetails.helmetCharges }),
+          ...(b.priceDetails.discount && { discount: b.priceDetails.discount }),
+          gst: b.priceDetails.gst || b.priceDetails.taxes,
+          gstPercentage: b.priceDetails.gstPercentage || 5,
+          totalAmount: b.priceDetails.totalAmount,
+        },
+      };
+
+      if (b.bookingType === "bike") {
+        bookingData.bike = {
+          items: b.bikeItems.map((item) => ({
+            id: item.bike._id,
+            name: item.bike.title,
+            brand: item.bike.brand,
+            model: item.bike.model,
+            images: item.bike.images,
+            quantity: item.quantity,
+            kmOption: item.kmOption,
+            pricePerUnit: item.pricePerUnit,
+            totalPrice: item.totalPrice,
+          })),
+          helmets: b.helmetQuantity || 0,
+        };
+        bookingData.dates = {
+          pickupDate: b.startDate,
+          dropDate: b.endDate,
+          pickupTime: b.startTime,
+          dropTime: b.endTime,
+          totalDays: b.bikeDetails?.totalDays || 1,
+        };
+      }
+
+      if (b.bookingType === "hostel" && b.hostel) {
+        bookingData.hostel = {
+          id: b.hostel._id,
+          name: b.hostel.name,
+          location: b.hostel.location,
+          images: b.hostel.images,
+          rating: b.hostel.ratings,
+          checkInTime: b.hostel.checkInTime,
+          checkOutTime: b.hostel.checkOutTime,
+          address: b.hostel.address,
+          contact: b.hostel.contactInfo,
+          roomType: b.roomType,
+          mealOption: b.mealOption,
+          beds: b.numberOfBeds,
+          nights: b.numberOfNights,
+          pricePerNight: (b.priceDetails.basePrice || b.priceDetails.subtotal) / (b.numberOfNights || 1),
+          isWorkstation: b.hostelDetails?.stayType === "workstation",
+        };
+        bookingData.dates = {
+          checkIn: b.checkIn || b.startDate,
+          checkOut: b.checkOut || b.endDate,
+          nights: b.numberOfNights || 1,
+        };
+      }
+
+      return bookingData;
+    }),
+
+    guest: {
+      name: primaryBooking.guestDetails?.name || primaryBooking.user.name,
+      email: primaryBooking.guestDetails?.email || primaryBooking.user.email,
+      phone: primaryBooking.guestDetails?.phone || primaryBooking.user.mobile,
+    },
+
+    actions: {
+      canPay: !bookings.every((b) => b.paymentStatus === "completed") && combinedRemaining > 0,
+      canCancel: bookings.some((b) => b.bookingStatus === "pending" || b.bookingStatus === "confirmed"),
+    },
   };
 
-  // Enhanced bookings with computed details
-  const enhancedBookings = bookings.map((booking) => {
-    const enhanced = booking.toObject();
-    
-    if (booking.bookingType === "bike") {
-      const startDateTime = new Date(
-        `${booking.startDate.toISOString().split("T")[0]}T${booking.startTime}`
-      );
-      const endDateTime = new Date(
-        `${booking.endDate.toISOString().split("T")[0]}T${booking.endTime}`
-      );
-      const durationInHours = (endDateTime - startDateTime) / (1000 * 60 * 60);
-      
-      enhanced.computedDetails = {
-        durationInHours: Math.round(durationInHours * 100) / 100,
-        durationInDays: Math.ceil(durationInHours / 24),
-      };
-    } else if (booking.bookingType === "hostel") {
-      const checkIn = new Date(booking.checkIn || booking.startDate);
-      const checkOut = new Date(booking.checkOut || booking.endDate);
-      const nights = Math.ceil((checkOut - checkIn) / (1000 * 60 * 60 * 24));
-      
-      enhanced.computedDetails = {
-        nights: nights,
-        checkInDate: checkIn,
-        checkOutDate: checkOut,
-      };
-    }
-    
-    return enhanced;
-  });
-
-  res.status(200).json({
-    success: true,
-    data: {
-      paymentGroupId,
-      bookings: enhancedBookings,
-      combinedTotals,
-      bookingCount: bookings.length,
-      allConfirmed: bookings.every((b) => b.bookingStatus === "confirmed"),
-      paymentCompleted: bookings.every((b) => b.paymentStatus === "completed"),
-    },
-  });
+  res.status(200).json({ success: true, data: response });
 });
 
 // @desc    Get single booking

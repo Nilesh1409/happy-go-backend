@@ -737,15 +737,16 @@ export const removeFromCart = asyncHandler(async (req, res) => {
       helmetQuantity: cart.helmetDetails.quantity,
     });
 
+    const hostelGst = Math.round((hostelSubtotal * pricing.gstPercentage) / 100);
     cart.pricing = {
       bikeSubtotal: pricing.subtotal,
       hostelSubtotal: hostelSubtotal,
       subtotal: pricing.subtotal + hostelSubtotal,
       bulkDiscount: pricing.bulkDiscount,
       extraCharges: pricing.extraCharges,
-      gst: Math.round(((pricing.subtotal + hostelSubtotal) * pricing.gstPercentage) / 100),
+      gst: pricing.gst + hostelGst,
       gstPercentage: pricing.gstPercentage,
-      total: pricing.subtotal + hostelSubtotal + Math.round(((pricing.subtotal + hostelSubtotal) * pricing.gstPercentage) / 100),
+      total: pricing.total + hostelSubtotal + hostelGst,
     };
 
     // Update individual item prices
